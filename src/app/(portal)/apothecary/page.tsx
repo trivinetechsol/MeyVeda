@@ -1,0 +1,214 @@
+"use client";
+
+import { useState } from "react";
+import Link from "next/link";
+
+const CART_ITEMS = [
+  { id: "rx-1", name: "Ashwagandha Churna", brand: "Kottakkal Arya Vaidya Sala", weight: "100g", price: 285, quantity: 1, prescribed: true, icon: "🌿" },
+  { id: "rx-2", name: "Triphala Churna", brand: "Himalaya Wellness", weight: "100g", price: 145, quantity: 1, prescribed: true, icon: "🫙" },
+  { id: "rx-3", name: "Brahmi Ghrita", brand: "Nagarjuna Herbal", weight: "150g", price: 410, quantity: 1, prescribed: true, icon: "💛" },
+];
+
+const WELLNESS = [
+  { name: "Chyawanprash", brand: "Dabur", price: 189, icon: "🫙" },
+  { name: "Tulsi Drop", brand: "Himalaya", price: 120, icon: "🌱" },
+  { name: "Neem Capsules", brand: "Organic India", price: 245, icon: "💊" },
+  { name: "Giloy Juice", brand: "Patanjali", price: 159, icon: "🥤" },
+  { name: "Triphala Tablets", brand: "Kottakkal", price: 95, icon: "🌿" },
+  { name: "Brahmi Oil", brand: "Bajaj Keo Karpin", price: 175, icon: "🫙" },
+];
+
+export default function ApothecaryPage() {
+  const [cart, setCart] = useState(CART_ITEMS);
+
+  function changeQty(id: string, delta: number) {
+    setCart((prev) =>
+      prev.map((item) =>
+        item.id === id ? { ...item, quantity: Math.max(1, item.quantity + delta) } : item
+      )
+    );
+  }
+
+  const subtotal = cart.reduce((a, c) => a + c.price * c.quantity, 0);
+  const shipping = 49;
+  const total = subtotal + shipping;
+
+  return (
+    <div className="px-4 sm:px-6 lg:px-8 py-6 max-w-7xl mx-auto">
+      {/* Header */}
+      <div className="mb-6 flex items-start justify-between gap-4">
+        <div>
+          <h1 className="font-display text-2xl font-semibold text-foreground">Apothecary</h1>
+          <p className="text-sm text-muted-foreground mt-1">Prescribed formulations & wellness essentials</p>
+        </div>
+        <div className="flex items-center gap-2">
+          <div className="relative">
+            <button className="flex items-center gap-2 bg-white border border-border px-4 py-2 rounded-xl text-sm font-medium hover:border-herb-green/30 transition-colors">
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.5}>
+                <circle cx="9" cy="21" r="1" /><circle cx="20" cy="21" r="1" />
+                <path d="M1 1h4l2.68 13.39a2 2 0 002 1.61h9.72a2 2 0 001.98-1.67L23 6H6" />
+              </svg>
+              Cart
+              <span className="bg-copper text-white text-[10px] font-bold w-5 h-5 rounded-full flex items-center justify-center">
+                {cart.length}
+              </span>
+            </button>
+          </div>
+        </div>
+      </div>
+
+      {/* Prescription upload */}
+      <div className="bg-white rounded-2xl border border-herb-green/30 p-4 mb-6 flex items-start gap-4">
+        <div className="w-10 h-10 rounded-xl bg-herb-green/10 border border-herb-green/20 flex items-center justify-center flex-shrink-0">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="oklch(0.29 0.09 158)" strokeWidth={1.5}>
+            <path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4M17 8l-5-5-5 5M12 3v12" />
+          </svg>
+        </div>
+        <div className="flex-1">
+          <p className="text-sm font-semibold text-foreground">Upload Prescription</p>
+          <p className="text-xs text-muted-foreground mt-0.5">
+            Order prescribed medicines directly from your doctor&apos;s Rx
+          </p>
+          <button className="mt-2 text-xs text-herb-green font-semibold flex items-center gap-1">
+            Choose File →
+          </button>
+        </div>
+        <div className="hidden sm:flex items-center gap-2 bg-herb-green/6 rounded-xl border border-herb-green/20 px-3 py-2">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="oklch(0.29 0.09 158)" strokeWidth={2}>
+            <path d="M22 11.08V12a10 10 0 11-5.93-9.14" /><polyline points="22 4 12 14.01 9 11.01" />
+          </svg>
+          <p className="text-xs text-herb-green font-medium">Rx-Dr.Aditi-05-Jun verified · 3 items loaded</p>
+        </div>
+      </div>
+
+      <div className="grid grid-cols-1 lg:grid-cols-[1fr_340px] gap-6">
+        {/* Left: Items */}
+        <div className="space-y-6">
+          {/* Prescribed */}
+          <section>
+            <h2 className="font-semibold text-foreground mb-3 flex items-center gap-2">
+              Prescribed Formulations
+              <span className="text-[10px] bg-herb-green/10 text-herb-green font-semibold px-2 py-0.5 rounded-full">
+                Rx Verified
+              </span>
+            </h2>
+            <div className="space-y-3">
+              {cart.map((item) => (
+                <div key={item.id} className="bg-white rounded-xl border border-border p-4 flex items-center gap-4">
+                  <div className="w-12 h-12 rounded-xl bg-ivory-gradient border border-border flex items-center justify-center text-2xl flex-shrink-0">
+                    {item.icon}
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-start justify-between gap-2">
+                      <div>
+                        <p className="text-sm font-semibold text-foreground">{item.name}</p>
+                        <p className="text-[10px] text-muted-foreground">{item.brand} · {item.weight}</p>
+                      </div>
+                      {item.prescribed && (
+                        <span className="flex-shrink-0 text-[10px] bg-herb-green/10 text-herb-green font-medium px-2 py-0.5 rounded-full">
+                          Prescribed
+                        </span>
+                      )}
+                    </div>
+                    <div className="flex items-center justify-between mt-3">
+                      <span className="text-sm font-bold text-foreground">₹{item.price}</span>
+                      <div className="flex items-center gap-1 border border-border rounded-lg overflow-hidden">
+                        <button
+                          onClick={() => changeQty(item.id, -1)}
+                          className="px-3 py-1.5 text-sm hover:bg-muted transition-colors"
+                        >
+                          −
+                        </button>
+                        <span className="px-3 text-xs font-semibold">{item.quantity}</span>
+                        <button
+                          onClick={() => changeQty(item.id, 1)}
+                          className="px-3 py-1.5 text-sm hover:bg-muted transition-colors"
+                        >
+                          +
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </section>
+
+          {/* Wellness essentials */}
+          <section>
+            <div className="flex items-center justify-between mb-3">
+              <h2 className="font-semibold text-foreground">Wellness Essentials</h2>
+              <button className="text-xs text-herb-green font-medium">Browse all →</button>
+            </div>
+            <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
+              {WELLNESS.map((p) => (
+                <div key={p.name} className="bg-white rounded-xl border border-border p-4">
+                  <div className="text-2xl mb-2">{p.icon}</div>
+                  <p className="text-xs font-semibold text-foreground leading-tight">{p.name}</p>
+                  <p className="text-[10px] text-muted-foreground mt-0.5">{p.brand}</p>
+                  <div className="flex items-center justify-between mt-3">
+                    <span className="text-sm font-bold">₹{p.price}</span>
+                    <button className="text-[10px] bg-herb-green text-white px-2.5 py-1 rounded-lg font-medium hover:bg-herb-green/90 transition-colors">
+                      Add
+                    </button>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </section>
+        </div>
+
+        {/* Right: Order summary */}
+        <div className="space-y-4">
+          <div className="bg-white rounded-2xl border border-border p-5 sticky top-20">
+            <h3 className="font-semibold text-foreground mb-4">Order Summary</h3>
+            <div className="space-y-2">
+              {cart.map((item) => (
+                <div key={item.id} className="flex justify-between text-xs">
+                  <span className="text-muted-foreground truncate pr-2">{item.name} × {item.quantity}</span>
+                  <span className="font-medium text-foreground flex-shrink-0">₹{item.price * item.quantity}</span>
+                </div>
+              ))}
+            </div>
+            <div className="mt-4 pt-4 border-t border-border space-y-2">
+              <div className="flex justify-between text-xs text-muted-foreground">
+                <span>Subtotal</span>
+                <span>₹{subtotal}</span>
+              </div>
+              <div className="flex justify-between text-xs text-muted-foreground">
+                <span>Shipping</span>
+                <span>₹{shipping}</span>
+              </div>
+              <div className="flex justify-between text-sm font-bold text-foreground border-t border-border pt-2 mt-2">
+                <span>Total Payable</span>
+                <span className="text-herb-green">₹{total}</span>
+              </div>
+            </div>
+            <Link href="/checkout">
+              <button className="mt-4 w-full py-3 bg-herb-green text-white rounded-xl text-sm font-semibold hover:bg-herb-green/90 transition-all active:scale-95 shadow-sm">
+                Proceed to Checkout
+              </button>
+            </Link>
+            <p className="text-[10px] text-muted-foreground text-center mt-3">
+              Free delivery on orders above ₹500 · Authenticity guaranteed
+            </p>
+          </div>
+
+          <div className="bg-ivory-deep rounded-2xl border border-border p-4">
+            <h4 className="text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-2">
+              Why MeyVeda Apothecary?
+            </h4>
+            {["Authentic AYUSH-certified products", "Doctor-prescribed formulations", "Cold-chain assured delivery", "FSSAI & GMP compliant"].map((f) => (
+              <div key={f} className="flex items-center gap-2 py-1.5">
+                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="oklch(0.29 0.09 158)" strokeWidth={2.5}>
+                  <polyline points="20 6 9 17 4 12" />
+                </svg>
+                <span className="text-xs text-muted-foreground">{f}</span>
+              </div>
+            ))}
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
