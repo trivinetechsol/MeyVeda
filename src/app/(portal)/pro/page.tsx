@@ -194,6 +194,52 @@ export default function ProDashboardPage() {
 
             {/* Right: Quick actions */}
             <div className="space-y-4">
+              {/* Walk-in CTA — prominent */}
+              <Link href="/pro/walk-in">
+                <div className="bg-herb-gradient rounded-2xl p-5 flex items-center gap-3 hover:opacity-90 hover:shadow-md transition-all cursor-pointer">
+                  <div className="w-10 h-10 rounded-xl bg-white/20 flex items-center justify-center flex-shrink-0">
+                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth={2.5}><circle cx="12" cy="8" r="4"/><path d="M4 20c0-4 3.6-7 8-7s8 3 8 7"/><line x1="12" y1="3" x2="12" y2="1"/></svg>
+                  </div>
+                  <div className="flex-1">
+                    <p className="text-sm font-bold text-white">Walk-in Patient</p>
+                    <p className="text-xs text-white/75 mt-0.5">Register new patient & start consultation now</p>
+                  </div>
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth={2.5}><polyline points="9 18 15 12 9 6"/></svg>
+                </div>
+              </Link>
+
+              <Link href="/pro/patients">
+                <div className="bg-white rounded-2xl border border-border p-5 flex items-center gap-3 hover:border-herb-green/30 hover:shadow-sm transition-all cursor-pointer">
+                  <div className="w-10 h-10 rounded-xl bg-herb-green/10 flex items-center justify-center flex-shrink-0">
+                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} className="text-herb-green">
+                      <circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/>
+                    </svg>
+                  </div>
+                  <div className="flex-1">
+                    <p className="text-sm font-semibold text-foreground">Patient Search</p>
+                    <p className="text-xs text-muted-foreground mt-0.5">Find & update any patient record instantly</p>
+                  </div>
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} className="text-muted-foreground">
+                    <polyline points="9 18 15 12 9 6"/>
+                  </svg>
+                </div>
+              </Link>
+
+              <Link href="/pro/prescribe">
+                <div className="bg-white rounded-2xl border border-border p-5 flex items-center gap-3 hover:border-herb-green/30 hover:shadow-sm transition-all cursor-pointer">
+                  <div className="w-10 h-10 rounded-xl bg-herb-green/10 flex items-center justify-center flex-shrink-0">
+                    <span className="text-xl">✍️</span>
+                  </div>
+                  <div className="flex-1">
+                    <p className="text-sm font-semibold text-foreground">Write Prescription</p>
+                    <p className="text-xs text-muted-foreground mt-0.5">Write Rx for any patient anytime</p>
+                  </div>
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} className="text-muted-foreground">
+                    <polyline points="9 18 15 12 9 6"/>
+                  </svg>
+                </div>
+              </Link>
+
               <Link href="/pro/emr">
                 <div className="bg-white rounded-2xl border border-copper/30 p-5 flex items-center gap-3 hover:border-copper/50 hover:shadow-sm transition-all cursor-pointer">
                   <div className="w-10 h-10 rounded-xl bg-copper/10 flex items-center justify-center">

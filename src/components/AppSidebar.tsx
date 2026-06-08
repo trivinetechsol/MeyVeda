@@ -25,6 +25,8 @@ const PATIENT_NAV: NavItem[] = [
 
 const PRACTITIONER_NAV: NavItem[] = [
   { href: "/pro", icon: "📊", label: "Dashboard", exact: true },
+  { href: "/pro/patients", icon: "🔍", label: "Patient Search" },
+  { href: "/pro/prescribe", icon: "✍️", label: "Write Rx" },
   { href: "/pro/emr", icon: "📋", label: "EMR Builder" },
   { href: "/pro/follow-ups", icon: "🔔", label: "Follow-ups", badge: "1" },
   { href: "/pro/inbox", icon: "💬", label: "Inbox", badge: "1" },

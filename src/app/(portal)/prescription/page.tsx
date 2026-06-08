@@ -1,61 +1,153 @@
 "use client";
 
+import { useState } from "react";
 import Link from "next/link";
 import { useAuth } from "@/contexts/auth-context";
+import { cn } from "@/lib/utils";
 
-const FORMULATIONS = [
+type Doctor = {
+  id: string;
+  name: string;
+  initials: string;
+  specialty: string;
+  qualification: string;
+  hprId: string;
+  lastVisit: string;
+  nextFollowUp: string;
+  totalRx: number;
+};
+
+type Rx = {
+  id: string;
+  date: string;
+  diagnosis: string;
+  assessment: { label: string; value: string }[];
+  formulations: { name: string; icon: string; dose: string; freq: string; anupana: string; duration: string }[];
+  lifestyle: { icon: string; title: string; desc: string }[];
+  followUpDate: string;
+  notes?: string;
+};
+
+const CARE_TEAM: Doctor[] = [
   {
-    name: "Ashwagandha Churna",
-    dose: "1 tsp",
-    freq: "Twice daily",
-    vehicle: "Warm milk",
-    duration: "60 days",
-    icon: "🌿",
+    id: "doc-aditi",
+    name: "Dr. Aditi Shastri",
+    initials: "AS",
+    specialty: "Ayurveda",
+    qualification: "BAMS, MD (Ayu)",
+    hprId: "HPR-4902-8822",
+    lastVisit: "05 Jun 2026",
+    nextFollowUp: "05 Jul 2026",
+    totalRx: 2,
   },
   {
-    name: "Triphala Churna",
-    dose: "1 tsp",
-    freq: "At bedtime",
-    vehicle: "Warm water",
-    duration: "45 days",
-    icon: "🫙",
-  },
-  {
-    name: "Brahmi Ghrita",
-    dose: "½ tsp",
-    freq: "Morning",
-    vehicle: "Before breakfast",
-    duration: "30 days",
-    icon: "💛",
+    id: "doc-rajan",
+    name: "Dr. Rajan Menon",
+    initials: "RM",
+    specialty: "Homeopathy",
+    qualification: "BHMS, MD (Hom)",
+    hprId: "HPR-3301-7654",
+    lastVisit: "28 May 2026",
+    nextFollowUp: "28 Jun 2026",
+    totalRx: 1,
   },
 ];
 
-const LIFESTYLE = [
-  { icon: "🧘", title: "Yoga", desc: "Bhujangasana, Paschimottanasana — 20 min daily" },
-  { icon: "🌅", title: "Dinacharya", desc: "Wake by 6 AM, oil pulling, tongue scraping" },
-  { icon: "🥗", title: "Ahara", desc: "Avoid spicy, oily foods. Prefer warm, cooked meals" },
-  { icon: "🌙", title: "Sleep", desc: "Retire by 10 PM. Avoid screens 1 hour before sleep" },
-];
+const PRESCRIPTIONS: Record<string, Rx[]> = {
+  "doc-aditi": [
+    {
+      id: "rx-a1",
+      date: "05 Jun 2026",
+      diagnosis: "Vata imbalance — chronic fatigue, digestive weakness",
+      assessment: [
+        { label: "Prakriti", value: "Vata-Pitta" },
+        { label: "Nadi", value: "Vata dominant" },
+        { label: "Jihva", value: "Mild coating" },
+        { label: "Agni", value: "Vishamagni" },
+      ],
+      formulations: [
+        { name: "Ashwagandha Churna", icon: "🌿", dose: "1 tsp", freq: "Twice daily", anupana: "Warm milk", duration: "60 days" },
+        { name: "Triphala Churna",    icon: "🫙", dose: "1 tsp", freq: "At bedtime",  anupana: "Warm water", duration: "45 days" },
+        { name: "Brahmi Ghrita",      icon: "💛", dose: "½ tsp", freq: "Morning",     anupana: "Before breakfast", duration: "30 days" },
+      ],
+      lifestyle: [
+        { icon: "🧘", title: "Yoga",       desc: "Bhujangasana, Paschimottanasana — 20 min daily" },
+        { icon: "🌅", title: "Dinacharya", desc: "Wake by 6 AM, oil pulling, tongue scraping" },
+        { icon: "🥗", title: "Ahara",      desc: "Avoid spicy, oily foods. Prefer warm, cooked meals" },
+        { icon: "🌙", title: "Sleep",      desc: "Retire by 10 PM. Avoid screens 1 hour before sleep" },
+      ],
+      followUpDate: "05 Jul 2026",
+    },
+    {
+      id: "rx-a2",
+      date: "14 Apr 2026",
+      diagnosis: "Initial assessment — Vata-Pitta Prakriti",
+      assessment: [
+        { label: "Prakriti", value: "Vata-Pitta" },
+        { label: "Nadi",     value: "Vata dominant" },
+        { label: "Jihva",    value: "Clean" },
+        { label: "Agni",     value: "Vishama" },
+      ],
+      formulations: [
+        { name: "Ashwagandha Churna", icon: "🌿", dose: "1 tsp", freq: "Once daily", anupana: "Warm milk", duration: "30 days" },
+      ],
+      lifestyle: [
+        { icon: "🥗", title: "Ahara", desc: "Light, easily digestible meals. Avoid raw foods." },
+        { icon: "🌙", title: "Sleep", desc: "Regular sleep schedule — 7–8 hours" },
+      ],
+      followUpDate: "05 Jun 2026",
+    },
+  ],
+  "doc-rajan": [
+    {
+      id: "rx-r1",
+      date: "28 May 2026",
+      diagnosis: "Stress-induced anxiety, disrupted sleep cycle",
+      assessment: [
+        { label: "Miasm",       value: "Psoric" },
+        { label: "Constitution", value: "Nux Vomica type" },
+        { label: "Modalities",  value: "Worse at night" },
+        { label: "Repertory",   value: "Mind — anxiety" },
+      ],
+      formulations: [
+        { name: "Nux Vomica 30C", icon: "💊", dose: "4 pills",         freq: "Twice daily", anupana: "Empty stomach",        duration: "21 days" },
+        { name: "Passiflora Q",   icon: "🌸", dose: "10 drops in water", freq: "At bedtime",  anupana: "15 min before sleep", duration: "30 days" },
+      ],
+      lifestyle: [
+        { icon: "🧘", title: "Meditation", desc: "10 min morning pranayama, avoid stimulants" },
+        { icon: "🌙", title: "Sleep",      desc: "No coffee after 2 PM, fixed wake-up time" },
+      ],
+      followUpDate: "28 Jun 2026",
+      notes: "Avoid strong coffee/camphor — antidote to homeopathic remedies.",
+    },
+  ],
+};
 
 export default function PrescriptionPage() {
   const { user } = useAuth();
   const patientName = user?.name ?? "Patient";
-  const patientInitials = patientName.split(" ").map((w) => w[0]).join("").slice(0, 2).toUpperCase();
+  const patientInitials = patientName.split(" ").map((w: string) => w[0]).join("").slice(0, 2).toUpperCase();
   const abhaId = user?.abhaLinked ? `${user.phone?.slice(-4) ?? ""}@abha` : null;
+
+  const [selectedDoctorId, setSelectedDoctorId] = useState(CARE_TEAM[0].id);
+  const [expandedRx, setExpandedRx] = useState<string | null>(PRESCRIPTIONS[CARE_TEAM[0].id]?.[0]?.id ?? null);
+
+  const selectedDoctor = CARE_TEAM.find(d => d.id === selectedDoctorId)!;
+  const rxList = PRESCRIPTIONS[selectedDoctorId] ?? [];
 
   return (
     <div className="px-4 sm:px-6 lg:px-8 py-6 max-w-7xl mx-auto">
       {/* Header */}
-      <div className="mb-6 flex items-start justify-between gap-4">
+      <div className="mb-6 flex items-start justify-between gap-4 flex-wrap">
         <div>
-          <h1 className="font-display text-2xl font-semibold text-foreground">Digital Care Plan</h1>
+          <h1 className="font-display text-2xl font-semibold text-foreground">My Prescriptions</h1>
           <p className="text-sm text-muted-foreground mt-1">
-            Prescribed by Dr. Aditi Shastri · Consultation 05 Jun 2026
+            {CARE_TEAM.length} doctor{CARE_TEAM.length > 1 ? "s" : ""} · {Object.values(PRESCRIPTIONS).flat().length} total prescriptions
           </p>
         </div>
         <div className="flex gap-2">
           <button className="flex items-center gap-2 text-xs font-medium border border-border px-3 py-2 rounded-xl hover:bg-muted transition-colors">
-            📥 Download PDF
+            📥 Download All
           </button>
           <Link href="/apothecary">
             <button className="flex items-center gap-2 text-xs font-semibold bg-herb-green text-white px-4 py-2 rounded-xl hover:bg-herb-green/90 transition-colors">
@@ -65,142 +157,245 @@ export default function PrescriptionPage() {
         </div>
       </div>
 
-      <div className="grid grid-cols-1 lg:grid-cols-[1fr_320px] gap-6">
-        {/* Left: Prescription content */}
-        <div className="space-y-5">
-          {/* Doctor + Patient */}
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-            <div className="bg-herb-gradient rounded-2xl p-5 text-white relative overflow-hidden">
-              <div className="absolute -right-3 -top-3 w-20 h-20 rounded-full bg-white/5" />
-              <p className="text-xs font-medium text-white/70 uppercase tracking-wider mb-2">Practitioner</p>
-              <div className="flex items-center gap-3">
-                <div className="w-12 h-12 rounded-xl bg-white/20 border border-white/30 flex items-center justify-center">
-                  <span className="text-white font-bold">AS</span>
+      {/* Patient card */}
+      <div className="bg-white rounded-2xl border border-border p-4 mb-6 flex items-center gap-4">
+        <div className="w-11 h-11 rounded-xl bg-sage/20 flex items-center justify-center flex-shrink-0">
+          <span className="text-sage font-bold">{patientInitials}</span>
+        </div>
+        <div className="flex-1">
+          <p className="text-sm font-semibold text-foreground">{patientName}</p>
+          <p className="text-xs text-muted-foreground">+91 {user?.phone ?? "—"}</p>
+        </div>
+        {abhaId ? (
+          <span className="text-[10px] bg-herb-green/10 text-herb-green font-semibold px-2.5 py-1 rounded-full border border-herb-green/20">ABHA Linked ✓</span>
+        ) : (
+          <span className="text-[10px] bg-amber-50 text-amber-700 font-semibold px-2.5 py-1 rounded-full border border-amber-100">ABHA not linked</span>
+        )}
+      </div>
+
+      {/* Doctor selector */}
+      <div className="mb-6">
+        <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-3">Care Team — Select a doctor to view prescriptions</p>
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+          {CARE_TEAM.map(doc => (
+            <button
+              key={doc.id}
+              onClick={() => {
+                setSelectedDoctorId(doc.id);
+                setExpandedRx(PRESCRIPTIONS[doc.id]?.[0]?.id ?? null);
+              }}
+              className={cn(
+                "p-4 rounded-2xl border text-left transition-all",
+                selectedDoctorId === doc.id
+                  ? "border-herb-green ring-1 ring-herb-green/20 bg-herb-green/5"
+                  : "border-border bg-white hover:border-herb-green/30"
+              )}
+            >
+              <div className="flex items-center gap-3 mb-3">
+                <div className={cn(
+                  "w-10 h-10 rounded-xl flex items-center justify-center flex-shrink-0 font-bold text-sm",
+                  selectedDoctorId === doc.id ? "bg-herb-gradient text-white" : "bg-muted text-foreground"
+                )}>
+                  {doc.initials}
+                </div>
+                <div className="flex-1 min-w-0">
+                  <p className="text-sm font-semibold text-foreground truncate">{doc.name}</p>
+                  <p className="text-xs text-muted-foreground">{doc.specialty}</p>
+                </div>
+                {selectedDoctorId === doc.id && (
+                  <div className="w-2 h-2 rounded-full bg-herb-green flex-shrink-0" />
+                )}
+              </div>
+              <div className="grid grid-cols-2 gap-2 text-[10px]">
+                <div>
+                  <p className="text-muted-foreground">Last visit</p>
+                  <p className="font-medium text-foreground">{doc.lastVisit}</p>
                 </div>
                 <div>
-                  <p className="font-semibold text-white">Dr. Aditi Shastri</p>
-                  <p className="text-xs text-white/70">BAMS, MD (Ayu)</p>
-                  <p className="text-[10px] text-white/60 mt-0.5">HPR-4902-8822</p>
+                  <p className="text-muted-foreground">Follow-up</p>
+                  <p className="font-medium text-herb-green">{doc.nextFollowUp}</p>
                 </div>
               </div>
-            </div>
+              <div className="mt-2 pt-2 border-t border-border">
+                <span className="text-[10px] text-muted-foreground">{doc.totalRx} prescription{doc.totalRx !== 1 ? "s" : ""} · {doc.qualification}</span>
+              </div>
+            </button>
+          ))}
+        </div>
+      </div>
 
-            <div className="bg-white rounded-2xl border border-border p-5">
-              <p className="text-xs font-medium text-muted-foreground uppercase tracking-wider mb-2">Patient</p>
-              <div className="flex items-center gap-3">
-                <div className="w-12 h-12 rounded-xl bg-sage/20 flex items-center justify-center">
-                  <span className="text-sage font-bold">{patientInitials}</span>
-                </div>
-                <div>
-                  <p className="font-semibold text-foreground">{patientName}</p>
-                  <p className="text-xs text-muted-foreground">+91 {user?.phone ?? "—"}</p>
-                  {abhaId ? (
-                    <p className="text-[10px] text-herb-green mt-0.5">ABHA Linked ✓ · {abhaId}</p>
-                  ) : (
-                    <p className="text-[10px] text-amber-600 mt-0.5">ABHA not linked</p>
+      {/* Prescriptions for selected doctor */}
+      <div className="grid grid-cols-1 lg:grid-cols-[1fr_300px] gap-6">
+        <div>
+          <div className="flex items-center gap-3 mb-4">
+            <div className="w-8 h-8 rounded-xl bg-herb-gradient flex items-center justify-center flex-shrink-0">
+              <span className="text-white text-xs font-bold">{selectedDoctor.initials}</span>
+            </div>
+            <div>
+              <p className="text-sm font-semibold text-foreground">{selectedDoctor.name}</p>
+              <p className="text-xs text-muted-foreground">{selectedDoctor.specialty} · {selectedDoctor.qualification}</p>
+            </div>
+          </div>
+
+          <div className="space-y-3">
+            {rxList.map((rx, idx) => {
+              const isOpen = expandedRx === rx.id;
+              const isLatest = idx === 0;
+              return (
+                <div key={rx.id} className={cn("bg-white rounded-2xl border transition-all overflow-hidden", isOpen ? "border-herb-green/30 shadow-sm" : "border-border")}>
+                  {/* Prescription header — always visible */}
+                  <button
+                    className="w-full p-5 flex items-start justify-between gap-3 text-left"
+                    onClick={() => setExpandedRx(isOpen ? null : rx.id)}
+                  >
+                    <div className="flex items-start gap-3">
+                      <div className={cn("w-9 h-9 rounded-xl flex items-center justify-center flex-shrink-0", isLatest ? "bg-herb-green text-white" : "bg-muted text-muted-foreground")}>
+                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2.5}><path d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2"/></svg>
+                      </div>
+                      <div>
+                        <div className="flex items-center gap-2">
+                          <p className="text-sm font-semibold text-foreground">{rx.date}</p>
+                          {isLatest && <span className="text-[10px] bg-herb-green text-white font-semibold px-2 py-0.5 rounded-full">Latest</span>}
+                        </div>
+                        <p className="text-xs text-muted-foreground mt-0.5 leading-relaxed">{rx.diagnosis}</p>
+                        <p className="text-[10px] text-muted-foreground mt-1">{rx.formulations.length} formulation{rx.formulations.length !== 1 ? "s" : ""} · Follow-up: {rx.followUpDate}</p>
+                      </div>
+                    </div>
+                    <svg
+                      width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}
+                      className={cn("flex-shrink-0 text-muted-foreground transition-transform mt-0.5", isOpen ? "rotate-180" : "")}
+                    >
+                      <polyline points="6 9 12 15 18 9" />
+                    </svg>
+                  </button>
+
+                  {/* Expanded content */}
+                  {isOpen && (
+                    <div className="px-5 pb-5 space-y-5 border-t border-border pt-4">
+                      {/* Assessment */}
+                      <div>
+                        <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-2">Clinical Assessment</p>
+                        <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+                          {rx.assessment.map(a => (
+                            <div key={a.label} className="bg-background rounded-xl p-2.5 text-center border border-border">
+                              <p className="text-xs font-semibold text-foreground">{a.value}</p>
+                              <p className="text-[10px] text-muted-foreground mt-0.5">{a.label}</p>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+
+                      {/* Formulations */}
+                      <div>
+                        <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-2">Prescribed Formulations</p>
+                        <div className="space-y-2.5">
+                          {rx.formulations.map((f, i) => (
+                            <div key={i} className="flex items-start gap-3 p-3.5 bg-herb-green/4 rounded-xl border border-herb-green/15">
+                              <span className="text-xl flex-shrink-0">{f.icon}</span>
+                              <div className="flex-1 min-w-0">
+                                <p className="text-sm font-semibold text-foreground">{f.name}</p>
+                                <div className="flex flex-wrap gap-2 mt-1 text-xs text-muted-foreground">
+                                  <span>💊 {f.dose}</span>
+                                  <span>⏰ {f.freq}</span>
+                                  <span>🫖 {f.anupana}</span>
+                                  <span>📅 {f.duration}</span>
+                                </div>
+                              </div>
+                              <span className="text-[10px] bg-herb-green/10 text-herb-green font-semibold px-2 py-0.5 rounded-full flex-shrink-0">Rx</span>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+
+                      {/* Lifestyle */}
+                      {rx.lifestyle.length > 0 && (
+                        <div>
+                          <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-2">Lifestyle Guidance</p>
+                          <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                            {rx.lifestyle.map(l => (
+                              <div key={l.title} className="flex items-start gap-2.5 p-3 bg-background border border-border rounded-xl">
+                                <span className="text-base flex-shrink-0">{l.icon}</span>
+                                <div>
+                                  <p className="text-xs font-semibold text-foreground">{l.title}</p>
+                                  <p className="text-[10px] text-muted-foreground mt-0.5 leading-relaxed">{l.desc}</p>
+                                </div>
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                      )}
+
+                      {/* Notes */}
+                      {rx.notes && (
+                        <div className="bg-amber-50 border border-amber-200 rounded-xl p-3.5">
+                          <p className="text-xs font-semibold text-amber-800 mb-0.5">Doctor's Note</p>
+                          <p className="text-xs text-amber-700 leading-relaxed">{rx.notes}</p>
+                        </div>
+                      )}
+
+                      {/* Actions */}
+                      <div className="flex gap-2 pt-1">
+                        <button className="flex-1 py-2 text-xs border border-border rounded-xl font-medium text-muted-foreground hover:bg-muted transition-colors">📥 Download PDF</button>
+                        <Link href="/apothecary" className="flex-1">
+                          <button className="w-full py-2 text-xs bg-herb-green text-white rounded-xl font-semibold hover:bg-herb-green/90 transition-all">🛒 Order Medicines</button>
+                        </Link>
+                      </div>
+                    </div>
                   )}
                 </div>
-              </div>
-            </div>
-          </div>
-
-          {/* Clinical Assessment */}
-          <div className="bg-white rounded-2xl border border-border p-5">
-            <h2 className="font-semibold text-foreground text-sm mb-4">Clinical Assessment</h2>
-            <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-              {[
-                { label: "Prakriti", value: "Vata-Pitta" },
-                { label: "Nadi", value: "Vata dominant" },
-                { label: "Jihva", value: "Mild coating" },
-                { label: "Agni", value: "Vishamagni" },
-              ].map((a) => (
-                <div key={a.label} className="bg-background rounded-xl p-3 text-center border border-border">
-                  <p className="text-xs font-semibold text-foreground">{a.value}</p>
-                  <p className="text-[10px] text-muted-foreground mt-0.5">{a.label}</p>
-                </div>
-              ))}
-            </div>
-            <div className="mt-4 p-3 bg-amber-50 border border-amber-200 rounded-xl">
-              <p className="text-xs text-amber-800 font-medium">Chief Complaint</p>
-              <p className="text-xs text-amber-700 mt-1">
-                Chronic fatigue, digestive irregularity, disturbed sleep pattern. Mild Vata aggravation noted.
-              </p>
-            </div>
-          </div>
-
-          {/* Formulations */}
-          <div className="bg-white rounded-2xl border border-border p-5">
-            <h2 className="font-semibold text-foreground text-sm mb-4">Prescribed Formulations</h2>
-            <div className="space-y-3">
-              {FORMULATIONS.map((item, i) => (
-                <div key={i} className="flex items-start gap-4 p-4 bg-herb-green/4 rounded-xl border border-herb-green/15">
-                  <span className="text-2xl flex-shrink-0">{item.icon}</span>
-                  <div className="flex-1 min-w-0">
-                    <p className="text-sm font-semibold text-foreground">{item.name}</p>
-                    <div className="flex flex-wrap gap-3 mt-1.5 text-xs text-muted-foreground">
-                      <span>💊 {item.dose}</span>
-                      <span>⏰ {item.freq}</span>
-                      <span>🫖 With {item.vehicle}</span>
-                      <span>📅 {item.duration}</span>
-                    </div>
-                  </div>
-                  <span className="text-[10px] bg-herb-green/10 text-herb-green font-semibold px-2 py-0.5 rounded-full flex-shrink-0">
-                    Rx
-                  </span>
-                </div>
-              ))}
-            </div>
-          </div>
-
-          {/* Lifestyle */}
-          <div className="bg-white rounded-2xl border border-border p-5">
-            <h2 className="font-semibold text-foreground text-sm mb-4">Lifestyle Guidance (Pathya)</h2>
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-              {LIFESTYLE.map((item) => (
-                <div key={item.title} className="flex items-start gap-3 p-3 bg-background border border-border rounded-xl">
-                  <span className="text-xl flex-shrink-0">{item.icon}</span>
-                  <div>
-                    <p className="text-xs font-semibold text-foreground">{item.title}</p>
-                    <p className="text-[10px] text-muted-foreground mt-0.5 leading-relaxed">{item.desc}</p>
-                  </div>
-                </div>
-              ))}
-            </div>
+              );
+            })}
           </div>
         </div>
 
-        {/* Right: Sidebar */}
+        {/* Sidebar */}
         <div className="space-y-4">
           <div className="bg-white rounded-2xl border border-border p-5">
-            <h3 className="font-semibold text-foreground text-sm mb-3">Follow-up Schedule</h3>
-            <div className="flex items-center gap-3 p-3 bg-herb-green/5 border border-herb-green/20 rounded-xl">
-              <span className="text-2xl">📅</span>
-              <div>
-                <p className="text-sm font-semibold text-foreground">5th July 2026</p>
-                <p className="text-xs text-muted-foreground">30-day review with Dr. Shastri</p>
-              </div>
+            <h3 className="font-semibold text-foreground text-sm mb-3">Next Follow-ups</h3>
+            <div className="space-y-2.5">
+              {CARE_TEAM.map(doc => (
+                <div key={doc.id} className="flex items-center gap-3 p-3 bg-herb-green/5 border border-herb-green/20 rounded-xl">
+                  <div className="w-8 h-8 rounded-lg bg-herb-gradient flex items-center justify-center flex-shrink-0">
+                    <span className="text-white text-[10px] font-bold">{doc.initials}</span>
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <p className="text-xs font-semibold text-foreground truncate">{doc.name}</p>
+                    <p className="text-[10px] text-herb-green font-medium">{doc.nextFollowUp}</p>
+                  </div>
+                </div>
+              ))}
             </div>
-            <button className="mt-3 w-full py-2 text-xs border border-herb-green/30 text-herb-green rounded-xl font-medium hover:bg-herb-green/5 transition-colors">
-              Book Follow-up →
-            </button>
           </div>
 
-          <div className="bg-ivory-deep rounded-2xl border border-border p-5">
-            <h3 className="font-semibold text-foreground text-sm mb-2">Disclaimer</h3>
+          <div className="bg-white rounded-2xl border border-border p-5">
+            <h3 className="font-semibold text-foreground text-sm mb-3">Active Medicines</h3>
+            <div className="space-y-1.5">
+              {Object.entries(PRESCRIPTIONS).flatMap(([docId, rxs]) => {
+                const doc = CARE_TEAM.find(d => d.id === docId);
+                return rxs[0]?.formulations.map(f => ({ ...f, specialty: doc?.specialty ?? "" })) ?? [];
+              }).map((f, i) => (
+                <div key={i} className="flex items-center gap-2.5 py-1.5 border-b border-border last:border-0">
+                  <span className="text-sm">{f.icon}</span>
+                  <div className="flex-1 min-w-0">
+                    <p className="text-xs font-medium text-foreground truncate">{f.name}</p>
+                    <p className="text-[10px] text-muted-foreground">{f.freq} · {f.specialty}</p>
+                  </div>
+                </div>
+              ))}
+            </div>
+            <Link href="/apothecary" className="block mt-3">
+              <button className="w-full py-2 text-xs font-semibold bg-herb-green text-white rounded-xl hover:bg-herb-green/90 transition-all">
+                🛒 Order All Active Medicines
+              </button>
+            </Link>
+          </div>
+
+          <div className="bg-ivory-deep rounded-2xl border border-border p-4">
+            <h4 className="text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-2">Disclaimer</h4>
             <p className="text-[11px] text-muted-foreground leading-relaxed">
-              This prescription is intended for the named patient only. Dosages are based on Prakriti assessment. Do not self-medicate. Contact Dr. Shastri if symptoms worsen.
+              Do not mix Ayurvedic and Homeopathic remedies within 30 minutes of each other. Avoid strong aromatic substances near homeopathic medicines.
             </p>
           </div>
-
-          <Link href="/apothecary">
-            <div className="bg-herb-green/6 rounded-2xl border border-herb-green/20 p-5 flex items-center gap-3 hover:bg-herb-green/10 transition-colors cursor-pointer">
-              <span className="text-3xl">🏥</span>
-              <div>
-                <p className="text-sm font-semibold text-foreground">Order from Apothecary</p>
-                <p className="text-xs text-muted-foreground mt-0.5">Get all 3 formulations delivered</p>
-              </div>
-            </div>
-          </Link>
         </div>
       </div>
     </div>
