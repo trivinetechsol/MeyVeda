@@ -65,7 +65,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     setUser(null);
     localStorage.removeItem(STORAGE_KEY);
     clearCookie();
-    router.push("/onboarding");
+    router.push("/login");
   }, [router]);
 
   const updateUser = useCallback((partial: Partial<AuthUser>) => {
