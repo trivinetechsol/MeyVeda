@@ -43,5 +43,6 @@ next-env.d.ts
 # npm cache
 .npm-cache/
 
-# firebase deploy cache
-.firebase/
+# Supabase
+supabase/.temp
+supabase/.branches

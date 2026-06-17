@@ -55,7 +55,7 @@ export function AppHeader({ onMenuClick }: AppHeaderProps) {
         </div>
       </div>
 
-      <div className="flex-1 lg:hidden" />
+      <div className="flex-1" />
 
       {/* Right actions */}
       <div className="flex items-center gap-1.5 flex-shrink-0">

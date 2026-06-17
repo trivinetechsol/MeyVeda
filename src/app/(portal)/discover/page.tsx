@@ -2,7 +2,8 @@
 
 import { useState } from "react";
 import { PractitionerCard } from "@/components/PractitionerCard";
-import { MOCK_PRACTITIONERS, DISCIPLINES } from "@/lib/data";
+import { DISCIPLINES } from "@/lib/data";
+import { usePractitioners } from "@/lib/hooks";
 import type { AYUSHDiscipline } from "@/lib/types";
 import { cn } from "@/lib/utils";
 
@@ -17,14 +18,28 @@ export default function DiscoverPage() {
   const [searchQuery, setSearchQuery] = useState("");
   const [showSymptoms, setShowSymptoms] = useState(false);
 
-  const filtered = MOCK_PRACTITIONERS.filter((d) => {
-    const matchesDiscipline = !selected || d.discipline === selected;
-    const matchesSearch =
-      !searchQuery ||
-      d.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      d.specialty.toLowerCase().includes(searchQuery.toLowerCase());
-    return matchesDiscipline && matchesSearch;
+  // Filter & sorting states
+  const [activeFilters, setActiveFilters] = useState<string[]>([]);
+  const [sortBy, setSortBy] = useState("relevance");
+
+  // Query database dynamically via hook
+  const { data: practitioners, loading } = usePractitioners({
+    discipline: selected ?? undefined,
+    search: searchQuery || undefined,
+    videoAvailable: activeFilters.includes("Video Available") || undefined,
+    under500: activeFilters.includes("Under ₹500") || undefined,
+    today: activeFilters.includes("Today") || undefined,
+    languages: activeFilters.filter((f) => ["Hindi", "Tamil", "English"].includes(f)),
+    sortBy: sortBy,
   });
+
+  const filtered = practitioners ?? [];
+
+  function toggleFilter(filterName: string) {
+    setActiveFilters((prev) =>
+      prev.includes(filterName) ? prev.filter((f) => f !== filterName) : [...prev, filterName]
+    );
+  }
 
   return (
     <div className="px-4 sm:px-6 lg:px-8 py-6 max-w-7xl mx-auto">
@@ -32,7 +47,7 @@ export default function DiscoverPage() {
       <div className="mb-6">
         <h1 className="font-display text-2xl font-semibold text-foreground">Find Your Specialist</h1>
         <p className="text-sm text-muted-foreground mt-1">
-          Browse {MOCK_PRACTITIONERS.length} verified AYUSH practitioners across 6 disciplines
+          Browse verified AYUSH practitioners across 6 disciplines
         </p>
       </div>
 
@@ -93,14 +108,23 @@ export default function DiscoverPage() {
 
         {/* Quick filter chips */}
         <div className="flex gap-2 flex-wrap">
-          {["Video Available", "Under ₹500", "Today", "Hindi", "Tamil", "English"].map((f) => (
-            <button
-              key={f}
-              className="text-xs border border-border rounded-full px-3 py-1.5 text-muted-foreground hover:border-herb-green/40 hover:text-herb-green transition-colors bg-white"
-            >
-              {f}
-            </button>
-          ))}
+          {["Video Available", "Under ₹500", "Today", "Hindi", "Tamil", "English"].map((f) => {
+            const isActive = activeFilters.includes(f);
+            return (
+              <button
+                key={f}
+                onClick={() => toggleFilter(f)}
+                className={cn(
+                  "text-xs border rounded-full px-3 py-1.5 transition-colors font-medium",
+                  isActive
+                    ? "bg-herb-green border-herb-green text-white animate-fade-in"
+                    : "border-border text-muted-foreground hover:border-herb-green/40 hover:text-herb-green bg-white"
+                )}
+              >
+                {f}
+              </button>
+            );
+          })}
         </div>
       </div>
 
@@ -144,25 +168,39 @@ export default function DiscoverPage() {
         <div>
           <div className="flex items-center justify-between mb-4">
             <p className="text-sm text-muted-foreground">
-              <span className="font-semibold text-foreground">{filtered.length}</span> verified practitioners
-              {selected && ` in ${selected}`}
+              {loading ? (
+                <span className="animate-pulse">Loading practitioners...</span>
+              ) : (
+                <>
+                  <span className="font-semibold text-foreground">{filtered.length}</span> verified practitioners
+                  {selected && ` in ${selected}`}
+                </>
+              )}
             </p>
-            <select className="text-xs border border-border rounded-lg px-2.5 py-1.5 bg-white text-muted-foreground focus:outline-none focus:border-herb-green/50">
-              <option>Sort: Relevance</option>
-              <option>Sort: Rating</option>
-              <option>Sort: Fee (low to high)</option>
-              <option>Sort: Next Available</option>
+            <select
+              value={sortBy}
+              onChange={(e) => setSortBy(e.target.value)}
+              className="text-xs border border-border rounded-lg px-2.5 py-1.5 bg-white text-muted-foreground focus:outline-none focus:border-herb-green/50 cursor-pointer"
+            >
+              <option value="relevance">Sort: Relevance</option>
+              <option value="rating">Sort: Rating</option>
+              <option value="fee-low-high">Sort: Fee (low to high)</option>
+              <option value="experience">Sort: Experience</option>
             </select>
           </div>
 
-          {filtered.length > 0 ? (
+          {loading ? (
+            <div className="flex items-center justify-center h-64">
+              <div className="w-8 h-8 rounded-full border-2 border-herb-green border-t-transparent animate-spin" />
+            </div>
+          ) : filtered.length > 0 ? (
             <div className="grid grid-cols-1 xl:grid-cols-2 gap-3">
               {filtered.map((doc) => (
                 <PractitionerCard key={doc.id} doctor={doc} />
               ))}
             </div>
           ) : (
-            <div className="text-center py-16">
+            <div className="text-center py-16 bg-white rounded-2xl border border-border">
               <span className="text-5xl">🌿</span>
               <p className="text-sm font-medium text-foreground mt-4">No practitioners found</p>
               <p className="text-xs text-muted-foreground mt-1">Try adjusting your filters or search</p>

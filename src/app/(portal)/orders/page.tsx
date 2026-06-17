@@ -1,96 +1,52 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import Link from "next/link";
 import { cn } from "@/lib/utils";
 import { useAuth } from "@/contexts/auth-context";
+import { useOrders } from "@/lib/hooks";
+import type { Order } from "@/lib/queries";
 
-type OrderStatus = "ordered" | "packed" | "shipped" | "out_for_delivery" | "delivered";
+type OrderStatus = "placed" | "prescription_verified" | "packed" | "dispatched" | "out_for_delivery" | "delivered" | "cancelled" | "refund_initiated" | "refunded";
 
 type OrderItem = { name: string; brand: string; weight: string; price: number; icon: string };
 
-type Order = {
-  id: string;
-  number: string;
-  date: string;
-  status: OrderStatus;
-  items: OrderItem[];
-  total: number;
-  tracking?: string;
-  eta?: string;
-  autoRefill: boolean;
-};
-
-const STATUS_STEPS: { id: OrderStatus; label: string; icon: string }[] = [
-  { id: "ordered", label: "Ordered", icon: "📦" },
+const STATUS_STEPS: { id: string; label: string; icon: string }[] = [
+  { id: "placed", label: "Ordered", icon: "📦" },
   { id: "packed", label: "Packed", icon: "📫" },
-  { id: "shipped", label: "Shipped", icon: "🚚" },
+  { id: "dispatched", label: "Shipped", icon: "🚚" },
   { id: "out_for_delivery", label: "Out for Delivery", icon: "🏃" },
   { id: "delivered", label: "Delivered", icon: "✅" },
 ];
 
-const STATUS_INDEX: Record<OrderStatus, number> = {
-  ordered: 0, packed: 1, shipped: 2, out_for_delivery: 3, delivered: 4,
+const STATUS_INDEX: Record<string, number> = {
+  placed: 0, prescription_verified: 0, packed: 1, dispatched: 2, out_for_delivery: 3, delivered: 4,
+  cancelled: 4, refund_initiated: 4, refunded: 4,
 };
 
-const STATUS_LABEL: Record<OrderStatus, string> = {
-  ordered: "Ordered",
+const STATUS_LABEL: Record<string, string> = {
+  placed: "Ordered",
+  prescription_verified: "Verified",
   packed: "Packed",
-  shipped: "Shipped",
+  dispatched: "Shipped",
   out_for_delivery: "Out for Delivery",
   delivered: "Delivered",
+  cancelled: "Cancelled",
+  refund_initiated: "Refund Initiated",
+  refunded: "Refunded",
 };
 
-const STATUS_COLOR: Record<OrderStatus, string> = {
-  ordered: "bg-blue-50 text-blue-700",
+const STATUS_COLOR: Record<string, string> = {
+  placed: "bg-blue-50 text-blue-700",
+  prescription_verified: "bg-blue-50 text-blue-700",
   packed: "bg-amber-50 text-amber-700",
-  shipped: "bg-herb-green/10 text-herb-green",
+  dispatched: "bg-herb-green/10 text-herb-green",
   out_for_delivery: "bg-copper/10 text-copper",
   delivered: "bg-muted text-muted-foreground",
+  cancelled: "bg-red-50 text-red-700",
+  refund_initiated: "bg-amber-50 text-amber-700",
+  refunded: "bg-muted text-muted-foreground",
 };
-
-const MOCK_ORDERS: Order[] = [
-  {
-    id: "o1",
-    number: "MV-2026-0605",
-    date: "05 Jun 2026",
-    status: "shipped",
-    tracking: "DTDC · 1234567890",
-    eta: "06 Jun 2026 · 3–7 PM",
-    autoRefill: false,
-    total: 889,
-    items: [
-      { name: "Ashwagandha Churna", brand: "Kottakkal Arya Vaidya Sala", weight: "100g", price: 285, icon: "🌿" },
-      { name: "Triphala Churna", brand: "Himalaya Wellness", weight: "100g", price: 145, icon: "🫙" },
-      { name: "Brahmi Ghrita", brand: "Nagarjuna Herbal", weight: "150g", price: 410, icon: "💛" },
-    ],
-  },
-  {
-    id: "o2",
-    number: "MV-2026-0512",
-    date: "12 May 2026",
-    status: "delivered",
-    autoRefill: true,
-    total: 520,
-    items: [
-      { name: "Chyawanprash", brand: "Dabur", weight: "500g", price: 299, icon: "🫙" },
-      { name: "Neem Capsules", brand: "Organic India", weight: "60 caps", price: 245, icon: "💊" },
-    ],
-  },
-  {
-    id: "o3",
-    number: "MV-2026-0401",
-    date: "01 Apr 2026",
-    status: "delivered",
-    autoRefill: false,
-    total: 675,
-    items: [
-      { name: "Giloy Juice", brand: "Patanjali", weight: "500ml", price: 159, icon: "🥤" },
-      { name: "Brahmi Oil", brand: "Bajaj Keo Karpin", weight: "200ml", price: 175, icon: "🫙" },
-      { name: "Tulsi Drops", brand: "Himalaya", weight: "30ml", price: 120, icon: "🌱" },
-    ],
-  },
-];
 
 type TabFilter = "active" | "all";
 
@@ -99,15 +55,24 @@ export default function OrdersPage() {
   const userName = user?.name ?? "You";
 
   const [tab, setTab] = useState<TabFilter>("active");
-  const [selectedId, setSelectedId] = useState<string>(MOCK_ORDERS[0].id);
-  const [autoRefillMap, setAutoRefillMap] = useState<Record<string, boolean>>(
-    Object.fromEntries(MOCK_ORDERS.map((o) => [o.id, o.autoRefill]))
-  );
 
-  const activeOrders = MOCK_ORDERS.filter((o) => o.status !== "delivered");
-  const displayOrders = tab === "active" ? activeOrders : MOCK_ORDERS;
-  const selectedOrder = MOCK_ORDERS.find((o) => o.id === selectedId) ?? MOCK_ORDERS[0];
-  const currentStepIndex = STATUS_INDEX[selectedOrder.status];
+  const { data: orders, loading } = useOrders(user?.phone);
+  const allOrders = orders ?? [];
+
+  const [selectedId, setSelectedId] = useState<string>("");
+  const [autoRefillMap, setAutoRefillMap] = useState<Record<string, boolean>>({});
+
+  useEffect(() => {
+    if (allOrders.length > 0 && !selectedId) {
+      setSelectedId(allOrders[0].id);
+      setAutoRefillMap(Object.fromEntries(allOrders.map((o) => [o.id, o.autoRefill])));
+    }
+  }, [allOrders, selectedId]);
+
+  const activeOrders = allOrders.filter((o) => o.status !== "delivered" && o.status !== "cancelled" && o.status !== "refunded");
+  const displayOrders = tab === "active" ? activeOrders : allOrders;
+  const selectedOrder = allOrders.find((o) => o.id === selectedId) ?? allOrders[0];
+  const currentStepIndex = selectedOrder ? (STATUS_INDEX[selectedOrder.status] ?? 0) : 0;
 
   function toggleAutoRefill(id: string) {
     setAutoRefillMap((prev) => ({ ...prev, [id]: !prev[id] }));

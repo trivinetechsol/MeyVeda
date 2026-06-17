@@ -5,6 +5,8 @@ import { useRouter } from "next/navigation";
 import { cn } from "@/lib/utils";
 import { useAuth } from "@/contexts/auth-context";
 import type { AuthUser } from "@/contexts/auth-context";
+import { createClient } from "@/lib/supabase";
+import { sendOtp, verifyOtp } from "@/lib/otp-client";
 
 type Step = "welcome" | "phone" | "otp" | "role" | "abha" | "patient-intake" | "practitioner-intake";
 type Flow = "new" | "returning";
@@ -35,12 +37,19 @@ export default function OnboardingPage() {
 
   const [step, setStep] = useState<Step>("welcome");
   const [flow, setFlow] = useState<Flow>("new");
-  const [phone, setPhone] = useState("");
-  const [otp, setOtp] = useState(["", "", "", ""]);
+  const [email, setEmail] = useState("");
+  const [otp, setOtp] = useState(["", "", "", "", "", ""]);
   const [resendTimer, setResendTimer] = useState(45);
   const [role, setRole] = useState<"patient" | "practitioner" | null>(null);
   const [abhaLinked, setAbhaLinked] = useState<boolean | null>(null);
   const [aadhaar, setAadhaar] = useState("");
+  const [error, setError] = useState("");
+  const [loading, setLoading] = useState(false);
+
+  // Common intake
+  const [fullName, setFullName] = useState("");
+  const [dob, setDob] = useState("");
+  const [gender, setGender] = useState<"male" | "female" | "other" | "prefer_not_to_say" | "">("");
 
   // Patient intake
   const [selectedGoals, setSelectedGoals] = useState<string[]>([]);
@@ -67,8 +76,31 @@ export default function OnboardingPage() {
     }, 1000);
   }
 
-  function handleSendOTP() {
-    if (phone.length === 10) startResendTimer();
+  async function handleSendOTP() {
+    if (!email) return;
+    setLoading(true);
+    setError("");
+    try {
+      // First check if user exists in flow='returning'
+      const supabase = createClient();
+      const { data: existingUser } = await supabase.from('users').select('id, role').eq('email', email).maybeSingle();
+      
+      if (flow === "returning" && !existingUser) {
+        throw new Error("No account found with this email. Please sign up instead.");
+      }
+      if (flow === "new" && existingUser) {
+        throw new Error("An account with this email already exists. Please sign in.");
+      }
+
+      await sendOtp(email);
+      startResendTimer();
+      setStep("otp");
+    } catch (err: any) {
+      console.error(err);
+      setError(err.message || "Failed to send OTP.");
+    } finally {
+      setLoading(false);
+    }
   }
 
   function handleOtpInput(index: number, val: string) {
@@ -76,45 +108,123 @@ export default function OnboardingPage() {
     const next = [...otp];
     next[index] = val;
     setOtp(next);
-    if (val && index < 3) {
+    if (val && index < 5) {
       (document.getElementById(`otp-${index + 1}`) as HTMLInputElement)?.focus();
     }
   }
 
-  function handleVerifyOTP() {
-    if (otp.join("").length < 4) return;
+  async function handleVerifyOTP() {
+    const otpString = otp.join("");
+    if (otpString.length < 6) return;
+    setLoading(true);
+    setError("");
 
-    if (flow === "returning") {
-      // Try to recover existing user from localStorage
-      try {
-        const stored = localStorage.getItem("mv_user");
-        if (stored) {
-          const userData: AuthUser = JSON.parse(stored);
-          if (userData.phone === phone) {
-            login(userData);
-            router.push(userData.role === "practitioner" ? "/pro" : "/");
-            return;
-          }
+    try {
+      await verifyOtp(email, otpString);
+
+      if (flow === "returning") {
+        const supabase = createClient();
+        const { data: dbUser, error: userError } = await supabase
+          .from("users")
+          .select("id, email, mobile, role")
+          .eq("email", email)
+          .single();
+        
+        if (userError || !dbUser) throw new Error("Could not load user data.");
+
+        let name = "Unknown";
+        if (dbUser.role === "practitioner") {
+          const { data: prac } = await supabase.from("practitioners").select("full_name").eq("user_id", dbUser.id).maybeSingle();
+          if (prac) name = prac.full_name;
+        } else {
+          const { data: pat } = await supabase.from("patients").select("full_name").eq("user_id", dbUser.id).maybeSingle();
+          if (pat) name = pat.full_name;
         }
-      } catch { /* ignore */ }
-      // Phone not in storage → treat as new user, collect role
-      setFlow("new");
-      setStep("role");
-    } else {
-      setStep("role");
+
+        login({
+          id: dbUser.id,
+          phone: dbUser.mobile || "",
+          role: dbUser.role as any,
+          name,
+          abhaLinked: true,
+          email: dbUser.email,
+        });
+        router.push(dbUser.role === "practitioner" ? "/pro" : "/discover");
+      } else {
+        setStep("role");
+      }
+    } catch (err: any) {
+      console.error(err);
+      setError(err.message || "Failed to verify OTP.");
+    } finally {
+      setLoading(false);
     }
   }
 
-  function finishPatient() {
-    const mockName = "Rohit Kumar";
-    login({ phone, role: "patient", name: mockName, abhaLinked: abhaLinked === true });
-    router.push("/");
+  async function finishPatient() {
+    setLoading(true);
+    setError("");
+    try {
+      const supabase = createClient();
+      const { data: newUser, error: userError } = await supabase.from('users').insert([{
+        email,
+        role: "patient"
+      }]).select().single();
+
+      if (userError) throw userError;
+
+      const { error: patientError } = await supabase.from('patients').insert([{
+        user_id: newUser.id,
+        full_name: fullName,
+        date_of_birth: dob,
+        gender: gender,
+        wellness_goals: selectedGoals
+      }]);
+
+      if (patientError) throw patientError;
+
+      login({ id: newUser.id, phone: "", role: "patient", name: fullName, abhaLinked: abhaLinked === true, email });
+      router.push("/discover");
+    } catch (err: any) {
+      console.error(err);
+      setError(err.message || "Failed to create account.");
+    } finally {
+      setLoading(false);
+    }
   }
 
-  function finishPractitioner() {
-    const mockName = "Dr. Aditi Shastri";
-    login({ phone, role: "practitioner", name: mockName, abhaLinked: false });
-    router.push("/pro");
+  async function finishPractitioner() {
+    setLoading(true);
+    setError("");
+    try {
+      const supabase = createClient();
+      const { data: newUser, error: userError } = await supabase.from('users').insert([{
+        email,
+        role: "practitioner"
+      }]).select().single();
+
+      if (userError) throw userError;
+
+      const { error: pracError } = await supabase.from('practitioners').insert([{
+        user_id: newUser.id,
+        full_name: fullName,
+        gender: gender || null,
+        hpr_id: hprNumber || null,
+        qualifications: selectedQuals,
+        specializations: selectedSpecialty ? [selectedSpecialty] : [],
+        disciplines: selectedDisciplines.length > 0 ? selectedDisciplines : ["Ayurveda"],
+      }]);
+
+      if (pracError) throw pracError;
+
+      login({ id: newUser.id, phone: "", role: "practitioner", name: fullName, abhaLinked: false, email });
+      router.push("/pro");
+    } catch (err: any) {
+      console.error(err);
+      setError(err.message || "Failed to create practitioner account.");
+    } finally {
+      setLoading(false);
+    }
   }
 
   function toggleGoal(g: string) {
@@ -196,38 +306,43 @@ export default function OnboardingPage() {
           </div>
         )}
 
-        {/* ── Phone ── */}
+        {/* ── Email ── */}
         {step === "phone" && (
           <div>
             <h2 className="font-display text-2xl font-semibold text-foreground mb-1">
-              {flow === "returning" ? "Welcome back" : "Enter your mobile"}
+              {flow === "returning" ? "Welcome back" : "Enter your email"}
             </h2>
             <p className="text-sm text-muted-foreground mb-6">
               {flow === "returning"
-                ? "Enter your registered mobile number to sign in"
+                ? "Enter your registered email address to sign in"
                 : "We'll send a one-time password to verify"}
             </p>
             <div className="flex gap-3 mb-4">
-              <div className="px-3 py-3 border border-border rounded-xl bg-muted text-sm font-medium text-foreground">+91</div>
               <input
-                type="tel"
-                maxLength={10}
-                value={phone}
-                onChange={(e) => setPhone(e.target.value.replace(/\D/g, ""))}
-                placeholder="10-digit mobile number"
+                type="email"
+                value={email}
+                onChange={(e) => setEmail(e.target.value)}
+                placeholder="your.email@example.com"
                 className="flex-1 px-4 py-3 border border-border rounded-xl text-sm focus:outline-none focus:border-herb-green/50 focus:ring-2 focus:ring-herb-green/10"
               />
             </div>
             {flow === "new" && (
-              <p className="text-xs text-muted-foreground mb-4">Your ABHA ID may be automatically linked if your Aadhaar is registered with this number.</p>
+              <p className="text-xs text-muted-foreground mb-4">Your ABHA ID may be automatically linked using Aadhaar later.</p>
             )}
+
+            {error && (
+              <div className="bg-red-50 border border-red-200 rounded-xl px-3.5 py-2.5 text-sm text-red-700 mb-4">
+                {error}
+              </div>
+            )}
+
             <button
-              onClick={() => { handleSendOTP(); setStep("otp"); }}
-              disabled={phone.length !== 10}
+              onClick={() => { handleSendOTP(); }}
+              disabled={!email || !email.includes("@")}
               className={cn("w-full py-3.5 rounded-xl text-sm font-semibold transition-all",
-                phone.length === 10 ? "bg-herb-green text-white hover:bg-herb-green/90 shadow-md" : "bg-muted text-muted-foreground cursor-not-allowed")}
+                (email && email.includes("@")) ? "bg-herb-green text-white hover:bg-herb-green/90 shadow-md" : "bg-muted text-muted-foreground cursor-not-allowed")}
             >
-              Send OTP
+              {loading ? "Sending..." : "Send OTP"}
             </button>
           </div>
         )}
@@ -236,7 +351,7 @@ export default function OnboardingPage() {
         {step === "otp" && (
           <div>
             <h2 className="font-display text-2xl font-semibold text-foreground mb-1">Verify OTP</h2>
-            <p className="text-sm text-muted-foreground mb-6">Sent to +91 {phone}</p>
+            <p className="text-sm text-muted-foreground mb-6">Sent to {email}</p>
             <div className="flex gap-3 justify-center mb-6">
               {otp.map((digit, i) => (
                 <input
@@ -258,13 +373,18 @@ export default function OnboardingPage() {
                 <button onClick={handleSendOTP} className="text-xs text-herb-green font-medium">Resend OTP</button>
               )}
             </div>
+            {error && (
+              <div className="bg-red-50 border border-red-200 rounded-xl px-3.5 py-2.5 text-sm text-red-700 mb-4">
+                {error}
+              </div>
+            )}
             <button
               onClick={handleVerifyOTP}
-              disabled={otp.join("").length < 4}
+              disabled={otp.join("").length < 6 || loading}
               className={cn("w-full py-3.5 rounded-xl text-sm font-semibold transition-all",
-                otp.join("").length === 4 ? "bg-herb-green text-white hover:bg-herb-green/90 shadow-md" : "bg-muted text-muted-foreground cursor-not-allowed")}
+                otp.join("").length === 6 ? "bg-herb-green text-white hover:bg-herb-green/90 shadow-md" : "bg-muted text-muted-foreground cursor-not-allowed")}
             >
-              {flow === "returning" ? "Sign In" : "Verify & Continue"}
+              {loading ? "Verifying..." : flow === "returning" ? "Sign In" : "Verify & Continue"}
             </button>
           </div>
         )}
@@ -362,8 +482,46 @@ export default function OnboardingPage() {
         {/* ── Patient Intake ── */}
         {step === "patient-intake" && (
           <div>
-            <h2 className="font-display text-2xl font-semibold text-foreground mb-1">Your Wellness Goals</h2>
+            <h2 className="font-display text-2xl font-semibold text-foreground mb-1">Your Details & Goals</h2>
             <p className="text-sm text-muted-foreground mb-6">Help us personalise your MeyVeda experience</p>
+
+            <div className="space-y-4 mb-6">
+              <div>
+                <label className="text-xs font-semibold text-muted-foreground uppercase tracking-wider block mb-1.5">Full Name</label>
+                <input
+                  type="text"
+                  value={fullName}
+                  onChange={(e) => setFullName(e.target.value)}
+                  placeholder="e.g. Rohit Kumar"
+                  className="w-full px-4 py-3 border border-border rounded-xl text-sm focus:outline-none focus:border-herb-green/50 focus:ring-2 focus:ring-herb-green/10"
+                />
+              </div>
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="text-xs font-semibold text-muted-foreground uppercase tracking-wider block mb-1.5">Date of Birth</label>
+                  <input
+                    type="date"
+                    value={dob}
+                    onChange={(e) => setDob(e.target.value)}
+                    className="w-full px-4 py-3 border border-border rounded-xl text-sm focus:outline-none focus:border-herb-green/50 bg-white"
+                  />
+                </div>
+                <div>
+                  <label className="text-xs font-semibold text-muted-foreground uppercase tracking-wider block mb-1.5">Gender</label>
+                  <select
+                    value={gender}
+                    onChange={(e) => setGender(e.target.value as any)}
+                    className="w-full px-4 py-3 border border-border rounded-xl text-sm focus:outline-none focus:border-herb-green/50 bg-white"
+                  >
+                    <option value="">Select gender</option>
+                    <option value="male">Male</option>
+                    <option value="female">Female</option>
+                    <option value="other">Other</option>
+                  </select>
+                </div>
+              </div>
+            </div>
+
             <div className="mb-5">
               <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-3">Health Goals (select all that apply)</p>
               <div className="flex flex-wrap gap-2">
@@ -398,11 +556,18 @@ export default function OnboardingPage() {
                 ))}
               </div>
             </div>
+            {error && (
+              <div className="bg-red-50 border border-red-200 rounded-xl px-3.5 py-2.5 text-sm text-red-700 mb-4">
+                {error}
+              </div>
+            )}
             <button
               onClick={finishPatient}
-              className="w-full py-3.5 bg-herb-green text-white rounded-xl text-sm font-semibold hover:bg-herb-green/90 transition-all shadow-md"
+              disabled={!fullName || !dob || !gender || loading}
+              className={cn("w-full py-3.5 bg-herb-green text-white rounded-xl text-sm font-semibold transition-all shadow-md",
+                (!fullName || !dob || !gender || loading) ? "opacity-60 cursor-not-allowed" : "hover:bg-herb-green/90")}
             >
-              Enter MeyVeda ✨
+              {loading ? "Creating account..." : "Enter MeyVeda ✨"}
             </button>
           </div>
         )}
@@ -419,6 +584,35 @@ export default function OnboardingPage() {
             <p className="text-sm text-muted-foreground mb-6">Help us verify and set up your practitioner profile.</p>
 
             <div className="space-y-4 mb-5">
+              <div>
+                <label className="text-xs font-semibold text-muted-foreground uppercase tracking-wider block mb-1.5">
+                  Full Name
+                </label>
+                <input
+                  type="text"
+                  value={fullName}
+                  onChange={(e) => setFullName(e.target.value)}
+                  placeholder="e.g. Dr. Aditi Shastri"
+                  className="w-full px-4 py-3 border border-border rounded-xl text-sm focus:outline-none focus:border-copper/50 focus:ring-2 focus:ring-copper/10"
+                />
+              </div>
+
+              <div>
+                <label className="text-xs font-semibold text-muted-foreground uppercase tracking-wider block mb-1.5">
+                  Gender
+                </label>
+                <select
+                  value={gender}
+                  onChange={(e) => setGender(e.target.value as any)}
+                  className="w-full px-4 py-3 border border-border rounded-xl text-sm focus:outline-none focus:border-copper/50 bg-white"
+                >
+                  <option value="">Select gender</option>
+                  <option value="male">Male</option>
+                  <option value="female">Female</option>
+                  <option value="other">Other</option>
+                </select>
+              </div>
+
               <div>
                 <label className="text-xs font-semibold text-muted-foreground uppercase tracking-wider block mb-1.5">
                   HPR Registration Number
@@ -479,11 +673,18 @@ export default function OnboardingPage() {
               </div>
             </div>
 
+            {error && (
+              <div className="bg-red-50 border border-red-200 rounded-xl px-3.5 py-2.5 text-sm text-red-700 mb-4">
+                {error}
+              </div>
+            )}
             <button
               onClick={finishPractitioner}
-              className="w-full py-3.5 bg-copper text-white rounded-xl text-sm font-semibold hover:bg-copper/90 transition-all shadow-md"
+              disabled={!fullName || !gender || loading}
+              className={cn("w-full py-3.5 bg-copper text-white rounded-xl text-sm font-semibold transition-all shadow-md",
+                (!fullName || !gender || loading) ? "opacity-60 cursor-not-allowed" : "hover:bg-copper/90")}
             >
-              Set Up My Practice ✨
+              {loading ? "Creating account..." : "Set Up My Practice ✨"}
             </button>
             <button
               onClick={finishPractitioner}

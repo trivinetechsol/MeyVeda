@@ -1,10 +1,11 @@
 "use client";
 
-import { Suspense, useState } from "react";
+import { Suspense, useState, useEffect } from "react";
 import { useSearchParams } from "next/navigation";
 import Link from "next/link";
 import { HPRBadge } from "@/components/Badges";
-import { MOCK_PRACTITIONERS } from "@/lib/data";
+import { usePractitioner, useFamilyMembers } from "@/lib/hooks";
+import { bookAppointment } from "@/lib/queries";
 import { formatCurrency, cn } from "@/lib/utils";
 import { useAuth } from "@/contexts/auth-context";
 
@@ -23,19 +24,38 @@ function BookingContent() {
   const params = useSearchParams();
   const { user } = useAuth();
 
-  const doctorId = params.get("doctor") ?? "doc-001";
-  const slot = params.get("slot") ?? "4:30 PM";
+  const doctorId = params.get("doctor") ?? "";
+  const slot = params.get("slot") ?? "";
+  const slotId = params.get("slotId") ?? "";
   const date = params.get("date") ?? new Date().toISOString().split("T")[0];
   const mode = (params.get("mode") ?? "video") as "video" | "clinic";
 
-  const doctor = MOCK_PRACTITIONERS.find((d) => d.id === doctorId) ?? MOCK_PRACTITIONERS[0];
+  const doctor = usePractitioner(doctorId).data;
+  const { data: rawFamilyMembers } = useFamilyMembers(user?.id);
+  const familyMembers = rawFamilyMembers ?? [];
 
   const [step, setStep] = useState<Step>("configure");
   const [consultMode, setConsultMode] = useState<"video" | "clinic">(mode);
   const [selectedPatient, setSelectedPatient] = useState("self");
+  const [selectedFamilyMemberId, setSelectedFamilyMemberId] = useState<string | null>(null);
   const [reason, setReason] = useState("");
   const [selectedPayment, setSelectedPayment] = useState("gpay");
   const [isProcessing, setIsProcessing] = useState(false);
+
+  // Automatically select the first family member if available
+  useEffect(() => {
+    if (familyMembers.length > 0 && !selectedFamilyMemberId) {
+      setSelectedFamilyMemberId(familyMembers[0].id);
+    }
+  }, [familyMembers, selectedFamilyMemberId]);
+
+  if (!doctor) {
+    return (
+      <div className="flex items-center justify-center h-64">
+        <div className="w-8 h-8 rounded-full border-2 border-herb-green border-t-transparent animate-spin" />
+      </div>
+    );
+  }
 
   const dateLabel = new Date(date).toLocaleDateString("en-IN", {
     weekday: "long",
@@ -47,12 +67,26 @@ function BookingContent() {
   const convFee = 18;
   const total = doctor.fee + gst + convFee;
 
-  function handlePayNow() {
+  async function handlePayNow() {
+    if (!user?.id || !slotId) return;
     setIsProcessing(true);
-    setTimeout(() => {
-      setIsProcessing(false);
+    try {
+      await bookAppointment({
+        userId: user.id,
+        slotId: slotId,
+        practitionerId: doctorId,
+        mode: consultMode,
+        reason: reason,
+        date: date,
+        time: slot,
+        familyMemberId: selectedPatient === "family" ? (selectedFamilyMemberId || undefined) : undefined,
+      });
       setStep("confirmed");
-    }, 2000);
+    } catch (err) {
+      console.error("Booking error:", err);
+    } finally {
+      setIsProcessing(false);
+    }
   }
 
   if (step === "confirmed") {
@@ -96,11 +130,6 @@ function BookingContent() {
             </button>
           </Link>
           <div className="flex gap-2.5">
-            <Link href="/waiting-room" className="flex-1">
-              <button className="w-full py-3 border border-herb-green/40 text-herb-green text-sm font-medium rounded-xl hover:bg-herb-green/5 transition-colors">
-                Go to Waiting Room
-              </button>
-            </Link>
             <Link href="/" className="flex-1">
               <button className="w-full py-3 border border-border text-sm font-medium rounded-xl hover:bg-muted transition-colors">
                 Back to Home
@@ -195,39 +224,82 @@ function BookingContent() {
               <div className="bg-white rounded-2xl border border-border p-5">
                 <h3 className="font-semibold text-foreground text-sm mb-3">Patient</h3>
                 <div className="space-y-2">
-                  {["self", "family"].map((p) => (
-                    <button
-                      key={p}
-                      onClick={() => setSelectedPatient(p)}
+                  <button
+                    onClick={() => setSelectedPatient("self")}
+                    className={cn(
+                      "w-full flex items-center gap-3 p-3 rounded-xl border text-left transition-all",
+                      selectedPatient === "self" ? "border-herb-green bg-herb-green/5" : "border-border hover:border-herb-green/30"
+                    )}
+                  >
+                    <div
                       className={cn(
-                        "w-full flex items-center gap-3 p-3 rounded-xl border text-left transition-all",
-                        selectedPatient === p ? "border-herb-green bg-herb-green/5" : "border-border hover:border-herb-green/30"
+                        "w-5 h-5 rounded-full border-2 flex items-center justify-center flex-shrink-0",
+                        selectedPatient === "self" ? "border-herb-green bg-herb-green" : "border-muted-foreground/40"
                       )}
                     >
-                      <div
-                        className={cn(
-                          "w-5 h-5 rounded-full border-2 flex items-center justify-center flex-shrink-0",
-                          selectedPatient === p ? "border-herb-green bg-herb-green" : "border-muted-foreground/40"
-                        )}
-                      >
-                        {selectedPatient === p && (
-                          <div className="w-2 h-2 rounded-full bg-white" />
-                        )}
-                      </div>
-                      <div>
-                        <p className="text-sm font-medium text-foreground">
-                          {p === "self" ? `Myself — ${user?.name ?? "You"}` : "Family Member"}
+                      {selectedPatient === "self" && (
+                        <div className="w-2 h-2 rounded-full bg-white" />
+                      )}
+                    </div>
+                    <div>
+                      <p className="text-sm font-medium text-foreground">
+                        Myself — {user?.name ?? "You"}
+                      </p>
+                      <p className="text-xs text-muted-foreground">
+                        {user?.abhaLinked ? `${user.phone?.slice(-4) ?? ""}@abha` : `+91 ${user?.phone ?? ""}`}
+                      </p>
+                    </div>
+                  </button>
+
+                  <button
+                    onClick={() => {
+                      setSelectedPatient("family");
+                      if (familyMembers.length > 0 && !selectedFamilyMemberId) {
+                        setSelectedFamilyMemberId(familyMembers[0].id);
+                      }
+                    }}
+                    className={cn(
+                      "w-full flex items-center gap-3 p-3 rounded-xl border text-left transition-all",
+                      selectedPatient === "family" ? "border-herb-green bg-herb-green/5" : "border-border hover:border-herb-green/30"
+                    )}
+                  >
+                    <div
+                      className={cn(
+                        "w-5 h-5 rounded-full border-2 flex items-center justify-center flex-shrink-0",
+                        selectedPatient === "family" ? "border-herb-green bg-herb-green" : "border-muted-foreground/40"
+                      )}
+                    >
+                      {selectedPatient === "family" && (
+                        <div className="w-2 h-2 rounded-full bg-white" />
+                      )}
+                    </div>
+                    <div>
+                      <p className="text-sm font-medium text-foreground">Family Member</p>
+                      <p className="text-xs text-muted-foreground">Book on behalf of a family member</p>
+                    </div>
+                  </button>
+
+                  {selectedPatient === "family" && (
+                    <div className="mt-3 pl-8 space-y-2">
+                      {familyMembers.length === 0 ? (
+                        <p className="text-xs text-amber-600 bg-amber-50 rounded-xl p-3 border border-amber-100">
+                          No family profiles found. <Link href="/profile/family" className="underline font-semibold text-herb-green">Add one here</Link> first.
                         </p>
-                        <p className="text-xs text-muted-foreground">
-                          {p === "self"
-                            ? user?.abhaLinked
-                              ? `${user.phone?.slice(-4) ?? ""}@abha`
-                              : `+91 ${user?.phone ?? ""}`
-                            : "Add or select a family profile"}
-                        </p>
-                      </div>
-                    </button>
-                  ))}
+                      ) : (
+                        <select
+                          value={selectedFamilyMemberId || ""}
+                          onChange={(e) => setSelectedFamilyMemberId(e.target.value)}
+                          className="w-full text-sm border border-border rounded-xl px-3 py-2.5 bg-white focus:outline-none focus:border-herb-green/50"
+                        >
+                          {familyMembers.map((m) => (
+                            <option key={m.id} value={m.id}>
+                              {m.name} ({m.relationship})
+                            </option>
+                          ))}
+                        </select>
+                      )}
+                    </div>
+                  )}
                 </div>
               </div>
 
@@ -245,7 +317,8 @@ function BookingContent() {
 
               <button
                 onClick={() => setStep("payment")}
-                className="w-full py-3.5 bg-herb-green text-white rounded-xl text-sm font-semibold hover:bg-herb-green/90 transition-all active:scale-95 shadow-sm"
+                disabled={!slotId || (selectedPatient === "family" && familyMembers.length === 0)}
+                className="w-full py-3.5 bg-herb-green text-white rounded-xl text-sm font-semibold hover:bg-herb-green/90 transition-all active:scale-95 shadow-sm disabled:opacity-50 disabled:cursor-not-allowed"
               >
                 Continue to Payment
               </button>

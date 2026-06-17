@@ -1,8 +1,15 @@
 "use client";
 
-import { useState, useMemo } from "react";
+import { useState, useMemo, useEffect } from "react";
 import Link from "next/link";
 import { cn } from "@/lib/utils";
+import {
+  getRegistryPatients,
+  savePatientVitals,
+  addPatientProblem,
+  removePatientProblem,
+  savePatientNote,
+} from "@/lib/queries";
 
 type Filter = "all" | "today" | "followup" | "recent";
 
@@ -30,123 +37,6 @@ type Patient = {
   activeMeds: number;
   vitals: { bpSys: number; bpDia: number; pulse: number; spo2: number; weight: number } | null;
 };
-
-const ALL_PATIENTS: Patient[] = [
-  {
-    id: "p1", name: "Rohit Kumar",    age: 32, gender: "Male",   phone: "+91 98765 43210", abha: "rohit@abha",
-    bloodGroup: "B+", prakriti: "Vata-Pitta",
-    lastVisit: "05 Jun 2026", lastVisitDaysAgo: 1, nextFollowUp: "05 Jul 2026", followUpDue: false, isToday: true,
-    conditions: "IBS (Vataja Grahani) · Anxiety",
-    systems: ["Ayurveda", "Homeopathy"], totalVisits: 4,
-    problems: [
-      { code: "GRH-V",  name: "Vataja Grahani",  status: "active"     },
-      { code: "ANX-01", name: "Anxiety / Stress", status: "active"     },
-    ],
-    allergySummary: "Sulfonamides (mod) · Peanuts (mod)",
-    activeMeds: 6,
-    vitals: { bpSys: 118, bpDia: 76, pulse: 72, spo2: 98, weight: 72 },
-  },
-  {
-    id: "p2", name: "Meera Patel",    age: 45, gender: "Female", phone: "+91 87654 32109", abha: "meera@abha",
-    bloodGroup: "A+", prakriti: "Pitta-Kapha",
-    lastVisit: "01 Jun 2026", lastVisitDaysAgo: 5, nextFollowUp: "01 Jul 2026", followUpDue: false, isToday: true,
-    conditions: "Sandhivata (Knee OA) · Hypertension",
-    systems: ["Ayurveda", "Siddha"], totalVisits: 3,
-    problems: [
-      { code: "SNV-01", name: "Sandhivata",   status: "active"     },
-      { code: "STH-01", name: "Sthaulya",     status: "active"     },
-      { code: "HTN-01", name: "Hypertension", status: "controlled" },
-    ],
-    allergySummary: "Penicillin (life-threatening) · Shellfish (severe)",
-    activeMeds: 5,
-    vitals: { bpSys: 138, bpDia: 88, pulse: 82, spo2: 97, weight: 78 },
-  },
-  {
-    id: "p3", name: "Suresh Rao",     age: 58, gender: "Male",   phone: "+91 76543 21098", abha: null,
-    bloodGroup: "O+", prakriti: "Kapha",
-    lastVisit: "20 May 2026", lastVisitDaysAgo: 17, nextFollowUp: "20 Jun 2026", followUpDue: true, isToday: true,
-    conditions: "Psoriasis (Kushtaroga) · DM2 · Hypertension",
-    systems: ["Ayurveda"], totalVisits: 2,
-    problems: [
-      { code: "KSH-01", name: "Kushtaroga",    status: "active"     },
-      { code: "DM-02",  name: "Prameha (DM2)", status: "controlled" },
-      { code: "HTN-01", name: "Hypertension",  status: "controlled" },
-    ],
-    allergySummary: "NSAIDs (severe) · Latex (moderate)",
-    activeMeds: 6,
-    vitals: { bpSys: 128, bpDia: 82, pulse: 68, spo2: 97, weight: 88 },
-  },
-  {
-    id: "p4", name: "Kavitha Nair",   age: 29, gender: "Female", phone: "+91 91234 56780", abha: "kavitha@abha",
-    bloodGroup: "AB+", prakriti: "Vata-Kapha",
-    lastVisit: "03 Jun 2026", lastVisitDaysAgo: 3, nextFollowUp: "03 Jul 2026", followUpDue: false, isToday: false,
-    conditions: "Post-Panchakarma maintenance · PCOD",
-    systems: ["Ayurveda"], totalVisits: 6,
-    problems: [
-      { code: "PCOD-01", name: "PCOD",                  status: "controlled" },
-      { code: "STR-01",  name: "Stress / Burnout",      status: "active"     },
-    ],
-    allergySummary: "No known drug allergies",
-    activeMeds: 3,
-    vitals: { bpSys: 110, bpDia: 70, pulse: 68, spo2: 99, weight: 58 },
-  },
-  {
-    id: "p5", name: "Arjun Menon",    age: 41, gender: "Male",   phone: "+91 82345 67891", abha: "arjun@abha",
-    bloodGroup: "B−", prakriti: "Pitta",
-    lastVisit: "28 Apr 2026", lastVisitDaysAgo: 39, nextFollowUp: null, followUpDue: false, isToday: false,
-    conditions: "Acid peptic disease · Migraine",
-    systems: ["Ayurveda", "Naturopathy"], totalVisits: 3,
-    problems: [
-      { code: "APD-01",  name: "Amlapitta (Acid PD)",   status: "active"  },
-      { code: "MIG-01",  name: "Shiro Roga (Migraine)", status: "active"  },
-    ],
-    allergySummary: "No known allergies",
-    activeMeds: 4,
-    vitals: { bpSys: 124, bpDia: 80, pulse: 74, spo2: 98, weight: 75 },
-  },
-  {
-    id: "p6", name: "Priya Sundaram", age: 36, gender: "Female", phone: "+91 73456 78902", abha: null,
-    bloodGroup: "O−", prakriti: "Vata",
-    lastVisit: "12 May 2026", lastVisitDaysAgo: 25, nextFollowUp: "12 Jun 2026", followUpDue: true, isToday: false,
-    conditions: "Hypothyroidism · Hair loss",
-    systems: ["Ayurveda"], totalVisits: 4,
-    problems: [
-      { code: "THY-01", name: "Hypothyroidism",   status: "controlled" },
-      { code: "KES-01", name: "Khalitya (Hair loss)", status: "active" },
-    ],
-    allergySummary: "Iodine contrast (mild)",
-    activeMeds: 5,
-    vitals: { bpSys: 108, bpDia: 68, pulse: 66, spo2: 98, weight: 61 },
-  },
-  {
-    id: "p7", name: "Vikram Desai",   age: 52, gender: "Male",   phone: "+91 94567 89013", abha: "vikram@abha",
-    bloodGroup: "A−", prakriti: "Kapha-Pitta",
-    lastVisit: "18 Jan 2026", lastVisitDaysAgo: 138, nextFollowUp: null, followUpDue: false, isToday: false,
-    conditions: "Type 2 Diabetes · Dyslipidaemia",
-    systems: ["Ayurveda", "Allopathy co-management"], totalVisits: 2,
-    problems: [
-      { code: "DM-02",  name: "Prameha (DM2)",    status: "controlled" },
-      { code: "MDO-01", name: "Medovriddhi (Dyslipidaemia)", status: "controlled" },
-    ],
-    allergySummary: "No known allergies",
-    activeMeds: 5,
-    vitals: { bpSys: 132, bpDia: 84, pulse: 70, spo2: 97, weight: 92 },
-  },
-  {
-    id: "p8", name: "Lalitha Krishnan", age: 68, gender: "Female", phone: "+91 65678 90124", abha: "lalitha@abha",
-    bloodGroup: "B+", prakriti: "Vata-Kapha",
-    lastVisit: "31 May 2026", lastVisitDaysAgo: 6, nextFollowUp: "14 Jun 2026", followUpDue: true, isToday: false,
-    conditions: "Osteoporosis · Chronic back pain",
-    systems: ["Ayurveda"], totalVisits: 7,
-    problems: [
-      { code: "OST-01", name: "Asthi Kshaya (Osteoporosis)", status: "active"  },
-      { code: "KT-01",  name: "Kati Shoola (Back pain)",     status: "active"  },
-    ],
-    allergySummary: "Aspirin (moderate)",
-    activeMeds: 6,
-    vitals: { bpSys: 142, bpDia: 88, pulse: 76, spo2: 96, weight: 64 },
-  },
-];
 
 type EditState = {
   notes: string;
@@ -177,10 +67,27 @@ export default function PatientsPage() {
   const [query, setQuery]           = useState("");
   const [filter, setFilter]         = useState<Filter>("all");
   const [selectedId, setSelectedId] = useState<string | null>(null);
-  const [patients, setPatients]     = useState(ALL_PATIENTS);
+  const [patients, setPatients]     = useState<Patient[]>([]);
+  const [isLoading, setIsLoading]   = useState(true);
   const [edit, setEdit]             = useState<EditState>(initialEdit());
   const [saved, setSaved]           = useState(false);
   const [activePanel, setActivePanel] = useState<"overview" | "vitals" | "problems" | "notes">("overview");
+
+  async function fetchPatients() {
+    setIsLoading(true);
+    try {
+      const data = await getRegistryPatients();
+      setPatients(data);
+    } catch (err) {
+      console.error("Fetch error:", err);
+    } finally {
+      setIsLoading(false);
+    }
+  }
+
+  useEffect(() => {
+    fetchPatients();
+  }, []);
 
   const filtered = useMemo(() => {
     let list = patients;
@@ -214,51 +121,54 @@ export default function PatientsPage() {
     setSaved(false);
   }
 
-  function saveVitals() {
+  async function saveVitals() {
     if (!selected) return;
     const bpSys  = parseFloat(edit.bpSys);
     const bpDia  = parseFloat(edit.bpDia);
     const pulse  = parseFloat(edit.pulse);
     const spo2   = parseFloat(edit.spo2);
     const weight = parseFloat(edit.weight);
-    setPatients(prev => prev.map(p => {
-      if (p.id !== selected.id) return p;
-      return {
-        ...p,
-        vitals: {
-          bpSys:  !isNaN(bpSys)  ? bpSys  : p.vitals?.bpSys  ?? 0,
-          bpDia:  !isNaN(bpDia)  ? bpDia  : p.vitals?.bpDia  ?? 0,
-          pulse:  !isNaN(pulse)  ? pulse  : p.vitals?.pulse   ?? 0,
-          spo2:   !isNaN(spo2)   ? spo2   : p.vitals?.spo2    ?? 0,
-          weight: !isNaN(weight) ? weight : p.vitals?.weight  ?? 0,
-        },
-        lastVisit: "06 Jun 2026",
-        lastVisitDaysAgo: 0,
-      };
-    }));
+
+    const newVitals = {
+      bpSys:  !isNaN(bpSys)  ? bpSys  : selected.vitals?.bpSys  ?? 120,
+      bpDia:  !isNaN(bpDia)  ? bpDia  : selected.vitals?.bpDia  ?? 80,
+      pulse:  !isNaN(pulse)  ? pulse  : selected.vitals?.pulse   ?? 72,
+      spo2:   !isNaN(spo2)   ? spo2   : selected.vitals?.spo2    ?? 98,
+      weight: !isNaN(weight) ? weight : selected.vitals?.weight  ?? 70,
+    };
+
+    await savePatientVitals(selected.id, newVitals);
     setSaved(true);
+    fetchPatients();
   }
 
-  function addProblem() {
+  async function addProblem() {
     if (!selected || !edit.newProblem.trim()) return;
-    setPatients(prev => prev.map(p => {
-      if (p.id !== selected.id) return p;
-      return {
-        ...p,
-        problems: [...p.problems, {
-          code: edit.newProblemCode.toUpperCase() || "NEW",
-          name: edit.newProblem.trim(),
-          status: "active" as const,
-        }],
-        conditions: p.conditions + " · " + edit.newProblem.trim(),
-      };
-    }));
+    const newProblem = {
+      code: edit.newProblemCode.toUpperCase() || "NEW",
+      name: edit.newProblem.trim(),
+      status: "active" as const,
+    };
+
+    await addPatientProblem(selected.id, newProblem);
     setEdit(e => ({ ...e, newProblem: "", newProblemCode: "" }));
     setSaved(true);
+    fetchPatients();
   }
 
-  function saveNotes() {
+  async function handleRemoveProblem(problemCode: string) {
+    if (!selected) return;
+    await removePatientProblem(selected.id, problemCode);
     setSaved(true);
+    fetchPatients();
+  }
+
+  async function saveNotes() {
+    if (!selected || !edit.notes.trim()) return;
+    await savePatientNote(selected.id, edit.notes.trim());
+    setEdit(e => ({ ...e, notes: "" }));
+    setSaved(true);
+    fetchPatients();
   }
 
   const FILTER_TABS: { id: Filter; label: string; count: () => number }[] = [
@@ -620,11 +530,7 @@ export default function PatientsPage() {
                               <span className={cn("text-[10px] font-semibold px-2 py-0.5 rounded-full capitalize",
                                 pr.status === "active" ? "text-red-600 bg-red-50" : pr.status === "controlled" ? "text-amber-700 bg-amber-50" : "text-herb-green bg-herb-green/10"
                               )}>{pr.status}</span>
-                              <button onClick={() => {
-                                setPatients(prev => prev.map(pt =>
-                                  pt.id !== p.id ? pt : { ...pt, problems: pt.problems.filter((_, j) => j !== i) }
-                                ));
-                              }} className="text-muted-foreground hover:text-red-500 transition-colors ml-1">
+                              <button onClick={() => handleRemoveProblem(pr.code)} className="text-muted-foreground hover:text-red-500 transition-colors ml-1">
                                 <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2.5}>
                                   <line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/>
                                 </svg>

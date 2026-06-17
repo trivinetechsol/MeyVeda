@@ -1,39 +1,48 @@
 "use client";
 
 import Link from "next/link";
-
-const STATS = [
-  { label: "Total Patients", value: "1,247", delta: "+34 this week", icon: "👥", color: "text-herb-green" },
-  { label: "Active Practitioners", value: "89", delta: "+3 pending verification", icon: "🩺", color: "text-copper" },
-  { label: "Hospitals / Clinics", value: "24", delta: "6 cities", icon: "🏥", color: "text-herb-green" },
-  { label: "Monthly Revenue", value: "₹4.2L", delta: "+18% vs last month", icon: "💰", color: "text-ayur-gold" },
-  { label: "Orders Today", value: "34", delta: "12 in transit", icon: "📦", color: "text-copper" },
-  { label: "Medicines Listed", value: "342", delta: "8 low stock", icon: "💊", color: "text-herb-green" },
-];
-
-const RECENT_PRACTITIONERS = [
-  { name: "Dr. Kavya Menon", specialty: "Ayurveda · Panchakarma", hpr: "HPR-2204-7712", status: "pending", date: "05 Jun 2026" },
-  { name: "Dr. Arjun Pillai", specialty: "Homeopathy", hpr: "HPR-3301-9943", status: "verified", date: "04 Jun 2026" },
-  { name: "Dr. Sunita Rao", specialty: "Yoga & Naturopathy", hpr: "HPR-1102-5521", status: "verified", date: "03 Jun 2026" },
-  { name: "Dr. Farhan Sheikh", specialty: "Unani Medicine", hpr: "HPR-4405-8832", status: "pending", date: "02 Jun 2026" },
-  { name: "Dr. Priya Krishnan", specialty: "Siddha", hpr: "HPR-5506-2217", status: "suspended", date: "01 Jun 2026" },
-];
-
-const RECENT_PATIENTS = [
-  { name: "Rohit Kumar", phone: "+91 98765 43210", abha: true, registered: "05 Jun 2026" },
-  { name: "Ananya Singh", phone: "+91 87654 32109", abha: false, registered: "04 Jun 2026" },
-  { name: "Vikram Nair", phone: "+91 76543 21098", abha: true, registered: "04 Jun 2026" },
-  { name: "Deepika Patel", phone: "+91 65432 10987", abha: true, registered: "03 Jun 2026" },
-  { name: "Suresh Bhat", phone: "+91 54321 09876", abha: false, registered: "02 Jun 2026" },
-];
+import {
+  useAdminDashboard,
+  useAdminPractitioners,
+  useAdminPatients,
+  useAdminClinics,
+  useAdminMedicines,
+} from "@/lib/hooks";
 
 const STATUS_STYLE: Record<string, string> = {
   verified: "bg-herb-green/10 text-herb-green",
   pending: "bg-amber-50 text-amber-700",
+  rejected: "bg-red-50 text-red-600",
   suspended: "bg-red-50 text-red-600",
 };
 
 export default function AdminDashboardPage() {
+  const { data: stats, loading: statsLoading } = useAdminDashboard();
+  const { data: practitioners, loading: pracsLoading } = useAdminPractitioners();
+  const { data: patients, loading: patientsLoading } = useAdminPatients();
+  const { data: clinics, loading: clinicsLoading } = useAdminClinics();
+  const { data: medicines, loading: medicinesLoading } = useAdminMedicines();
+
+  if (statsLoading || pracsLoading || patientsLoading || clinicsLoading || medicinesLoading) {
+    return (
+      <div className="flex items-center justify-center min-h-[60vh]">
+        <div className="w-8 h-8 border-4 border-herb-green border-t-transparent rounded-full animate-spin"></div>
+      </div>
+    );
+  }
+
+  const recentPracs = (practitioners ?? []).slice(0, 5);
+  const recentPatients = (patients ?? []).slice(0, 5);
+
+  const statsList = [
+    { label: "Total Patients", value: stats?.totalPatients ?? 0, delta: "Registered patients", icon: "👥", color: "text-herb-green" },
+    { label: "Active Practitioners", value: stats?.totalPractitioners ?? 0, delta: `${stats?.pendingVerifications ?? 0} pending verification`, icon: "🩺", color: "text-copper" },
+    { label: "Hospitals / Clinics", value: clinics?.length ?? 0, delta: "Partner centers", icon: "🏥", color: "text-herb-green" },
+    { label: "Monthly Revenue", value: `₹${Math.round((stats?.revenue ?? 0) / 100)}`, delta: "Live DB summary", icon: "💰", color: "text-ayur-gold" },
+    { label: "Total Orders", value: stats?.totalOrders ?? 0, delta: "All time orders", icon: "📦", color: "text-copper" },
+    { label: "Medicines Listed", value: medicines?.length ?? 0, delta: "Drug catalog", icon: "💊", color: "text-herb-green" },
+  ];
+
   return (
     <div className="px-4 sm:px-6 lg:px-8 py-6 max-w-7xl mx-auto">
       <div className="mb-6">
@@ -43,7 +52,7 @@ export default function AdminDashboardPage() {
 
       {/* Stats grid */}
       <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3 mb-8">
-        {STATS.map((s) => (
+        {statsList.map((s) => (
           <div key={s.label} className="bg-white rounded-2xl border border-border p-4">
             <div className="text-xl mb-2">{s.icon}</div>
             <p className={`font-display text-xl font-bold ${s.color}`}>{s.value}</p>
@@ -78,23 +87,33 @@ export default function AdminDashboardPage() {
             <Link href="/admin/practitioners" className="text-xs text-herb-green font-medium hover:underline">View all →</Link>
           </div>
           <div className="divide-y divide-border">
-            {RECENT_PRACTITIONERS.map((p) => (
-              <div key={p.name} className="flex items-center gap-3 px-5 py-3">
-                <div className="w-8 h-8 rounded-xl bg-herb-green/10 flex items-center justify-center flex-shrink-0">
-                  <span className="text-herb-green text-xs font-bold">{p.name.split(" ")[1][0]}</span>
-                </div>
-                <div className="flex-1 min-w-0">
-                  <p className="text-sm font-medium text-foreground truncate">{p.name}</p>
-                  <p className="text-[10px] text-muted-foreground">{p.specialty} · {p.hpr}</p>
-                </div>
-                <div className="flex flex-col items-end gap-1">
-                  <span className={`text-[10px] font-semibold px-2 py-0.5 rounded-full ${STATUS_STYLE[p.status]}`}>
-                    {p.status}
-                  </span>
-                  <span className="text-[10px] text-muted-foreground">{p.date}</span>
-                </div>
-              </div>
-            ))}
+            {recentPracs.length === 0 ? (
+              <p className="text-xs text-muted-foreground px-5 py-4">No practitioners registered yet.</p>
+            ) : (
+              recentPracs.map((p) => {
+                const spec = (p.specializations ?? [])[0] ?? (p.disciplines ?? [])[0] ?? "General";
+                const dateStr = p.created_at ? new Date(p.created_at).toLocaleDateString("en-IN", { day: '2-digit', month: 'short', year: 'numeric' }) : "";
+                return (
+                  <div key={p.id} className="flex items-center gap-3 px-5 py-3">
+                    <div className="w-8 h-8 rounded-xl bg-herb-green/10 flex items-center justify-center flex-shrink-0">
+                      <span className="text-herb-green text-xs font-bold">
+                        {p.full_name ? p.full_name.split(" ").slice(-1)[0][0] : "P"}
+                      </span>
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <p className="text-sm font-medium text-foreground truncate">{p.full_name}</p>
+                      <p className="text-[10px] text-muted-foreground">{spec} · {p.experience_years ?? 0} yrs exp</p>
+                    </div>
+                    <div className="flex flex-col items-end gap-1">
+                      <span className={`text-[10px] font-semibold px-2 py-0.5 rounded-full ${STATUS_STYLE[p.verification_status] ?? "bg-gray-100 text-gray-700"}`}>
+                        {p.verification_status}
+                      </span>
+                      <span className="text-[10px] text-muted-foreground">{dateStr}</span>
+                    </div>
+                  </div>
+                );
+              })
+            )}
           </div>
         </div>
 
@@ -105,24 +124,36 @@ export default function AdminDashboardPage() {
             <Link href="/admin/patients" className="text-xs text-herb-green font-medium hover:underline">View all →</Link>
           </div>
           <div className="divide-y divide-border">
-            {RECENT_PATIENTS.map((p) => (
-              <div key={p.name} className="flex items-center gap-3 px-5 py-3">
-                <div className="w-8 h-8 rounded-xl bg-sage/10 flex items-center justify-center flex-shrink-0">
-                  <span className="text-sage text-xs font-bold">{p.name[0]}</span>
-                </div>
-                <div className="flex-1 min-w-0">
-                  <p className="text-sm font-medium text-foreground truncate">{p.name}</p>
-                  <p className="text-[10px] text-muted-foreground">{p.phone}</p>
-                </div>
-                <div className="flex flex-col items-end gap-1">
-                  {p.abha
-                    ? <span className="text-[10px] font-semibold text-herb-green bg-herb-green/10 px-2 py-0.5 rounded-full">ABHA ✓</span>
-                    : <span className="text-[10px] text-muted-foreground bg-muted px-2 py-0.5 rounded-full">No ABHA</span>
-                  }
-                  <span className="text-[10px] text-muted-foreground">{p.registered}</span>
-                </div>
-              </div>
-            ))}
+            {recentPatients.length === 0 ? (
+              <p className="text-xs text-muted-foreground px-5 py-4">No patients registered yet.</p>
+            ) : (
+              recentPatients.map((p) => {
+                const userObj = Array.isArray(p.user) ? p.user[0] : p.user;
+                const contact = userObj?.mobile || userObj?.email || "No contact info";
+                const dateStr = p.created_at ? new Date(p.created_at).toLocaleDateString("en-IN", { day: '2-digit', month: 'short', year: 'numeric' }) : "";
+                const hasAbha = p.abha ? (Array.isArray(p.abha) ? p.abha.length > 0 : !!p.abha.abha_id) : false;
+                return (
+                  <div key={p.id} className="flex items-center gap-3 px-5 py-3">
+                    <div className="w-8 h-8 rounded-xl bg-sage/10 flex items-center justify-center flex-shrink-0">
+                      <span className="text-sage text-xs font-bold">
+                        {p.full_name ? p.full_name[0] : "P"}
+                      </span>
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <p className="text-sm font-medium text-foreground truncate">{p.full_name}</p>
+                      <p className="text-[10px] text-muted-foreground">{contact}</p>
+                    </div>
+                    <div className="flex flex-col items-end gap-1">
+                      {hasAbha
+                        ? <span className="text-[10px] font-semibold text-herb-green bg-herb-green/10 px-2 py-0.5 rounded-full">ABHA ✓</span>
+                        : <span className="text-[10px] text-muted-foreground bg-muted px-2 py-0.5 rounded-full">No ABHA</span>
+                      }
+                      <span className="text-[10px] text-muted-foreground">{dateStr}</span>
+                    </div>
+                  </div>
+                );
+              })
+            )}
           </div>
         </div>
       </div>

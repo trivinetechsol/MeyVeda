@@ -6,6 +6,7 @@ import { useRouter } from "next/navigation";
 export type UserRole = "patient" | "practitioner";
 
 export interface AuthUser {
+  id?: string;
   phone: string;
   role: UserRole;
   name: string;
@@ -65,7 +66,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     setUser(null);
     localStorage.removeItem(STORAGE_KEY);
     clearCookie();
-    router.push("/login");
+    router.push("/onboarding");
   }, [router]);
 
   const updateUser = useCallback((partial: Partial<AuthUser>) => {

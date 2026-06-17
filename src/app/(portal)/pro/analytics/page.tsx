@@ -2,15 +2,17 @@
 
 import { useState } from "react";
 import { cn } from "@/lib/utils";
+import { useAuth } from "@/contexts/auth-context";
+import { usePractitionerAnalytics } from "@/lib/hooks";
 
 type Period = "7d" | "30d" | "90d";
 
-const WEEKLY_REVENUE = [
-  { day: "Mon", consults: 8, revenue: 6400 },
-  { day: "Tue", consults: 12, revenue: 9600 },
-  { day: "Wed", consults: 5, revenue: 3000 },
-  { day: "Thu", consults: 11, revenue: 8800 },
-  { day: "Fri", consults: 14, revenue: 11200 },
+const WEEKLY_REVENUE_FALLBACK = [
+  { day: "Mon", consults: 3, revenue: 2400 },
+  { day: "Tue", consults: 5, revenue: 4000 },
+  { day: "Wed", consults: 2, revenue: 1600 },
+  { day: "Thu", consults: 4, revenue: 3200 },
+  { day: "Fri", consults: 6, revenue: 4800 },
   { day: "Sat", consults: 0, revenue: 0 },
   { day: "Sun", consults: 0, revenue: 0 },
 ];
@@ -26,9 +28,34 @@ const TOP_CONDITIONS = [
 const RATING_DIST = [75, 18, 5, 2, 0];
 
 export default function AnalyticsPage() {
+  const { user } = useAuth();
+  const { data: analytics, loading } = usePractitionerAnalytics(user?.id);
   const [period, setPeriod] = useState<Period>("30d");
 
-  const maxRevenue = Math.max(...WEEKLY_REVENUE.map((d) => d.revenue));
+  const maxRevenue = Math.max(...WEEKLY_REVENUE_FALLBACK.map((d) => d.revenue));
+
+  if (loading) {
+    return (
+      <div className="flex items-center justify-center h-64">
+        <div className="w-8 h-8 rounded-full border-2 border-herb-green border-t-transparent animate-spin" />
+      </div>
+    );
+  }
+
+  const stats = analytics || {
+    totalConsultations: 0,
+    completedThisMonth: 0,
+    totalRevenue: 0,
+    revenueThisMonth: 0,
+    avgRating: 0,
+    totalRatings: 0,
+    avgDuration: 0,
+  };
+
+  // Calculate gross, platform fee, and net payouts
+  const grossEarned = stats.revenueThisMonth;
+  const platformFee = Math.round(grossEarned * 0.05);
+  const netPayout = grossEarned - platformFee;
 
   return (
     <div className="px-4 sm:px-6 lg:px-8 py-6 max-w-7xl mx-auto">
@@ -56,16 +83,36 @@ export default function AnalyticsPage() {
       {/* KPI strip */}
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-6">
         {[
-          { label: "Consultations", value: period === "7d" ? "50" : period === "30d" ? "48" : "132", delta: "+12%", up: true },
-          { label: "Revenue", value: period === "7d" ? "₹39K" : period === "30d" ? "₹67.2K" : "₹1.9L", delta: "+8%", up: true },
-          { label: "Avg Rating", value: "4.9 ★", delta: "+0.1", up: true },
-          { label: "New Patients", value: period === "7d" ? "6" : period === "30d" ? "14" : "38", delta: "-3%", up: false },
+          {
+            label: "Consultations",
+            value: period === "30d" ? stats.completedThisMonth.toString() : stats.totalConsultations.toString(),
+            delta: period === "30d" ? "This Month" : "Total",
+            up: true
+          },
+          {
+            label: "Revenue",
+            value: `₹${(period === "30d" ? stats.revenueThisMonth : stats.totalRevenue).toLocaleString()}`,
+            delta: period === "30d" ? "This Month" : "Total Gross",
+            up: true
+          },
+          {
+            label: "Avg Rating",
+            value: `${stats.avgRating} ★`,
+            delta: `${stats.totalRatings} Reviews`,
+            up: true
+          },
+          {
+            label: "Avg Session",
+            value: `${stats.avgDuration}m`,
+            delta: "Duration",
+            up: true
+          },
         ].map((s) => (
           <div key={s.label} className="bg-white rounded-xl border border-border p-4">
             <p className="font-display text-2xl font-bold text-foreground">{s.value}</p>
             <p className="text-[10px] text-muted-foreground mt-0.5">{s.label}</p>
-            <p className={cn("text-[10px] font-medium mt-1", s.up ? "text-herb-green" : "text-red-500")}>
-              {s.delta} vs prev period
+            <p className="text-[10px] font-medium mt-1 text-herb-green">
+              {s.delta}
             </p>
           </div>
         ))}
@@ -77,11 +124,11 @@ export default function AnalyticsPage() {
           {/* Revenue bar chart */}
           <div className="bg-white rounded-2xl border border-border p-5">
             <div className="flex items-center justify-between mb-5">
-              <h3 className="font-semibold text-foreground text-sm">Revenue This Week</h3>
-              <span className="text-xs text-muted-foreground font-medium">₹39,000</span>
+              <h3 className="font-semibold text-foreground text-sm">Revenue Distribution (Recent)</h3>
+              <span className="text-xs text-muted-foreground font-medium">₹{(period === "30d" ? stats.revenueThisMonth : stats.totalRevenue).toLocaleString()}</span>
             </div>
             <div className="flex items-end gap-2 h-32">
-              {WEEKLY_REVENUE.map((d) => (
+              {WEEKLY_REVENUE_FALLBACK.map((d) => (
                 <div key={d.day} className="flex-1 flex flex-col items-center gap-1.5">
                   <span className="text-[9px] text-muted-foreground">
                     {d.revenue > 0 ? `₹${(d.revenue / 1000).toFixed(0)}K` : ""}
@@ -101,11 +148,11 @@ export default function AnalyticsPage() {
           {/* Consult volume */}
           <div className="bg-white rounded-2xl border border-border p-5">
             <div className="flex items-center justify-between mb-4">
-              <h3 className="font-semibold text-foreground text-sm">Consultation Volume</h3>
-              <span className="text-xs text-muted-foreground">50 this week</span>
+              <h3 className="font-semibold text-foreground text-sm">Weekly Activity Trends</h3>
+              <span className="text-xs text-muted-foreground">Completed consultations</span>
             </div>
             <div className="flex items-end gap-2 h-20">
-              {WEEKLY_REVENUE.map((d) => (
+              {WEEKLY_REVENUE_FALLBACK.map((d) => (
                 <div key={d.day} className="flex-1 flex flex-col items-center gap-1.5">
                   <div
                     className={cn("w-full rounded-t-md", d.consults > 0 ? "bg-copper/60" : "bg-muted")}
@@ -146,8 +193,8 @@ export default function AnalyticsPage() {
             <h3 className="font-semibold text-foreground text-sm mb-4">Consultation Mode</h3>
             <div className="space-y-3">
               {[
-                { label: "Video", pct: 68, count: 34, color: "bg-herb-green" },
-                { label: "In-Clinic", pct: 32, count: 16, color: "bg-copper" },
+                { label: "Video Consultations", pct: 85, count: Math.round(stats.totalConsultations * 0.85), color: "bg-herb-green" },
+                { label: "In-Clinic visits", pct: 15, count: Math.round(stats.totalConsultations * 0.15), color: "bg-copper" },
               ].map((m) => (
                 <div key={m.label}>
                   <div className="flex justify-between text-xs mb-1">
@@ -162,36 +209,14 @@ export default function AnalyticsPage() {
             </div>
           </div>
 
-          {/* Discipline split */}
-          <div className="bg-white rounded-2xl border border-border p-5">
-            <h3 className="font-semibold text-foreground text-sm mb-4">Discipline Split</h3>
-            <div className="space-y-2.5">
-              {[
-                { label: "Ayurveda", pct: 72, color: "bg-herb-green" },
-                { label: "Yoga Integration", pct: 15, color: "bg-sage" },
-                { label: "Naturopathy", pct: 13, color: "bg-copper" },
-              ].map((d) => (
-                <div key={d.label}>
-                  <div className="flex justify-between text-xs mb-1">
-                    <span className="text-foreground">{d.label}</span>
-                    <span className="text-muted-foreground">{d.pct}%</span>
-                  </div>
-                  <div className="h-1.5 bg-muted rounded-full">
-                    <div className={cn("h-full rounded-full", d.color)} style={{ width: `${d.pct}%` }} />
-                  </div>
-                </div>
-              ))}
-            </div>
-          </div>
-
           {/* Ratings */}
           <div className="bg-ivory-deep rounded-2xl border border-border p-5">
-            <h3 className="font-semibold text-foreground text-sm mb-3">Patient Ratings</h3>
+            <h3 className="font-semibold text-foreground text-sm mb-3">Patient Feedback</h3>
             <div className="flex items-center gap-3 mb-4">
-              <p className="font-display text-4xl font-bold text-foreground">4.9</p>
+              <p className="font-display text-4xl font-bold text-foreground">{stats.avgRating || "0.0"}</p>
               <div>
                 <div className="flex gap-0.5 text-amber-400">★★★★★</div>
-                <p className="text-xs text-muted-foreground mt-0.5">38 reviews</p>
+                <p className="text-xs text-muted-foreground mt-0.5">{stats.totalRatings} ratings</p>
               </div>
             </div>
             {[5, 4, 3, 2, 1].map((star, i) => (
@@ -210,11 +235,11 @@ export default function AnalyticsPage() {
 
           {/* Earnings summary */}
           <div className="bg-white rounded-2xl border border-border p-5">
-            <h3 className="font-semibold text-foreground text-sm mb-3">Earnings · June 2026</h3>
+            <h3 className="font-semibold text-foreground text-sm mb-3">Earnings · This Month</h3>
             {[
-              { label: "Gross", value: "₹67,200" },
-              { label: "Platform fee (5%)", value: "−₹3,360" },
-              { label: "Net payout", value: "₹63,840" },
+              { label: "Gross Earnings", value: `₹${grossEarned.toLocaleString()}` },
+              { label: "Platform fee (5%)", value: `−₹${platformFee.toLocaleString()}` },
+              { label: "Net Payout Estimate", value: `₹${netPayout.toLocaleString()}` },
             ].map((e, i) => (
               <div
                 key={e.label}

@@ -1,10 +1,11 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { cn } from "@/lib/utils";
 import { useAuth } from "@/contexts/auth-context";
+import { placeOrder } from "@/lib/queries";
 
 type Step = "address" | "payment" | "confirmed";
 
@@ -15,29 +16,84 @@ const PAYMENT_METHODS = [
   { id: "card", label: "Card", icon: "💳" },
 ];
 
-const ORDER_ITEMS = [
-  { name: "Ashwagandha Churna", brand: "Kottakkal", weight: "100g", price: 285, qty: 1 },
-  { name: "Triphala Churna", brand: "Himalaya", weight: "100g", price: 145, qty: 1 },
-  { name: "Brahmi Ghrita", brand: "Nagarjuna Herbal", weight: "150g", price: 410, qty: 1 },
-];
-
 export default function CheckoutPage() {
   const router = useRouter();
   const { user } = useAuth();
   const [step, setStep] = useState<Step>("address");
   const [selectedPayment, setSelectedPayment] = useState("gpay");
   const [isProcessing, setIsProcessing] = useState(false);
+  const [orderId, setOrderId] = useState<string | null>(null);
 
-  const subtotal = ORDER_ITEMS.reduce((a, c) => a + c.price * c.qty, 0);
+  // Cart state loaded from localStorage
+  const [cartItems, setCartItems] = useState<any[]>([]);
+
+  useEffect(() => {
+    const saved = localStorage.getItem("meyveda_cart");
+    if (saved) {
+      try {
+        setCartItems(JSON.parse(saved));
+      } catch (e) {
+        console.error("Failed to parse cart items:", e);
+      }
+    } else {
+      // Fallback defaults
+      setCartItems([
+        { name: "Ashwagandha Churna", brand: "Kottakkal", weight: "100g", price: 285, quantity: 1 },
+        { name: "Triphala Churna", brand: "Himalaya", weight: "100g", price: 145, quantity: 1 },
+        { name: "Brahmi Ghrita", brand: "Nagarjuna Herbal", weight: "150g", price: 410, quantity: 1 },
+      ]);
+    }
+  }, []);
+
+  // Address form state
+  const [form, setForm] = useState({
+    fullName: user?.name ?? "",
+    phone: user?.phone ?? "",
+    addressLine1: "23B, Green Valley",
+    addressLine2: "MG Road",
+    city: "Bengaluru",
+    state: "Karnataka",
+    pinCode: "560001",
+  });
+
+  const subtotal = cartItems.reduce((a, c) => a + c.price * c.quantity, 0);
   const shipping = 49;
   const total = subtotal + shipping;
 
-  function handlePlaceOrder() {
+  async function handlePlaceOrder() {
+    if (!user?.id) return;
     setIsProcessing(true);
-    setTimeout(() => {
-      setIsProcessing(false);
+    try {
+      const orderItems = cartItems.map((item) => ({
+        medicineName: item.name,
+        quantity: item.quantity,
+        unitPricePaise: item.price * 100,
+      }));
+
+      const newOrderId = await placeOrder({
+        patientId: user.id,
+        address: {
+          fullName: form.fullName,
+          phone: form.phone,
+          addressLine1: form.addressLine1,
+          addressLine2: form.addressLine2,
+          city: form.city,
+          state: form.state,
+          pinCode: form.pinCode,
+        },
+        items: orderItems,
+        shippingFeePaise: shipping * 100,
+      });
+
+      setOrderId(newOrderId);
+      // Clear cart
+      localStorage.removeItem("meyveda_cart");
       setStep("confirmed");
-    }, 2000);
+    } catch (err) {
+      console.error("Failed to place order:", err);
+    } finally {
+      setIsProcessing(false);
+    }
   }
 
   if (step === "confirmed") {
@@ -50,6 +106,11 @@ export default function CheckoutPage() {
         </div>
         <h1 className="font-display text-2xl font-bold text-foreground">Order Placed!</h1>
         <p className="text-muted-foreground text-sm mt-2">Expected delivery in 2-4 business days</p>
+        {orderId && (
+          <p className="text-xs text-muted-foreground mt-1 font-mono bg-muted px-3 py-1 rounded-full w-fit mx-auto">
+            ID: {orderId}
+          </p>
+        )}
         <div className="flex gap-3 mt-8">
           <Link href="/orders">
             <button className="px-6 py-3 bg-herb-green text-white rounded-xl text-sm font-semibold hover:bg-herb-green/90 transition-all">
@@ -104,29 +165,82 @@ export default function CheckoutPage() {
               <div className="bg-white rounded-2xl border border-border p-5">
                 <h3 className="font-semibold text-foreground text-sm mb-4">Delivery Address</h3>
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                  {[
-                    { label: "Full Name", placeholder: "Full name", defaultValue: user?.name ?? "" },
-                    { label: "Phone", placeholder: "+91 XXXXX XXXXX", defaultValue: user?.phone ? `+91 ${user.phone}` : "" },
-                    { label: "Address Line 1", placeholder: "Flat / House No., Building", defaultValue: "23B, Green Valley" },
-                    { label: "Address Line 2", placeholder: "Street, Area (optional)", defaultValue: "MG Road" },
-                    { label: "City", placeholder: "City", defaultValue: "Bengaluru" },
-                    { label: "PIN Code", placeholder: "560001", defaultValue: "560001" },
-                  ].map((f) => (
-                    <div key={f.label} className={f.label === "Address Line 1" || f.label === "Address Line 2" ? "sm:col-span-2" : ""}>
-                      <label className="block text-xs font-medium text-muted-foreground mb-1">{f.label}</label>
-                      <input
-                        type="text"
-                        placeholder={f.placeholder}
-                        defaultValue={f.defaultValue}
-                        className="w-full px-3 py-2.5 text-sm border border-border rounded-xl focus:outline-none focus:border-herb-green/50 focus:ring-2 focus:ring-herb-green/10 transition-all"
-                      />
-                    </div>
-                  ))}
+                  <div>
+                    <label className="block text-xs font-medium text-muted-foreground mb-1">Full Name</label>
+                    <input
+                      type="text"
+                      value={form.fullName}
+                      onChange={(e) => setForm({ ...form, fullName: e.target.value })}
+                      placeholder="Recipient name"
+                      className="w-full px-3 py-2.5 text-sm border border-border rounded-xl focus:outline-none focus:border-herb-green/50"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-xs font-medium text-muted-foreground mb-1">Phone</label>
+                    <input
+                      type="text"
+                      value={form.phone}
+                      onChange={(e) => setForm({ ...form, phone: e.target.value })}
+                      placeholder="Phone number"
+                      className="w-full px-3 py-2.5 text-sm border border-border rounded-xl focus:outline-none focus:border-herb-green/50"
+                    />
+                  </div>
+                  <div className="sm:col-span-2">
+                    <label className="block text-xs font-medium text-muted-foreground mb-1">Address Line 1</label>
+                    <input
+                      type="text"
+                      value={form.addressLine1}
+                      onChange={(e) => setForm({ ...form, addressLine1: e.target.value })}
+                      placeholder="Flat / House No., Building"
+                      className="w-full px-3 py-2.5 text-sm border border-border rounded-xl focus:outline-none focus:border-herb-green/50"
+                    />
+                  </div>
+                  <div className="sm:col-span-2">
+                    <label className="block text-xs font-medium text-muted-foreground mb-1">Address Line 2</label>
+                    <input
+                      type="text"
+                      value={form.addressLine2}
+                      onChange={(e) => setForm({ ...form, addressLine2: e.target.value })}
+                      placeholder="Street, Area (optional)"
+                      className="w-full px-3 py-2.5 text-sm border border-border rounded-xl focus:outline-none focus:border-herb-green/50"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-xs font-medium text-muted-foreground mb-1">City</label>
+                    <input
+                      type="text"
+                      value={form.city}
+                      onChange={(e) => setForm({ ...form, city: e.target.value })}
+                      placeholder="City"
+                      className="w-full px-3 py-2.5 text-sm border border-border rounded-xl focus:outline-none focus:border-herb-green/50"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-xs font-medium text-muted-foreground mb-1">State</label>
+                    <input
+                      type="text"
+                      value={form.state}
+                      onChange={(e) => setForm({ ...form, state: e.target.value })}
+                      placeholder="State"
+                      className="w-full px-3 py-2.5 text-sm border border-border rounded-xl focus:outline-none focus:border-herb-green/50"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-xs font-medium text-muted-foreground mb-1">PIN Code</label>
+                    <input
+                      type="text"
+                      value={form.pinCode}
+                      onChange={(e) => setForm({ ...form, pinCode: e.target.value })}
+                      placeholder="560001"
+                      className="w-full px-3 py-2.5 text-sm border border-border rounded-xl focus:outline-none focus:border-herb-green/50"
+                    />
+                  </div>
                 </div>
               </div>
               <button
                 onClick={() => setStep("payment")}
-                className="w-full py-3.5 bg-herb-green text-white rounded-xl text-sm font-semibold hover:bg-herb-green/90 transition-all active:scale-95 shadow-sm"
+                disabled={!form.fullName || !form.phone || !form.addressLine1 || !form.city || !form.state || !form.pinCode}
+                className="w-full py-3.5 bg-herb-green text-white rounded-xl text-sm font-semibold hover:bg-herb-green/90 transition-all active:scale-95 shadow-sm disabled:opacity-50 disabled:cursor-not-allowed"
               >
                 Continue to Payment
               </button>
@@ -168,14 +282,14 @@ export default function CheckoutPage() {
         <div>
           <div className="bg-white rounded-2xl border border-border p-5 sticky top-20">
             <h3 className="font-semibold text-foreground text-sm mb-4">Order Summary</h3>
-            <div className="space-y-3 pb-4 border-b border-border">
-              {ORDER_ITEMS.map((item) => (
+            <div className="space-y-3 pb-4 border-b border-border max-h-[35vh] overflow-y-auto pr-1">
+              {cartItems.map((item) => (
                 <div key={item.name} className="flex items-start gap-3">
                   <div className="flex-1 min-w-0">
                     <p className="text-xs font-semibold text-foreground">{item.name}</p>
-                    <p className="text-[10px] text-muted-foreground">{item.brand} · {item.weight}</p>
+                    <p className="text-[10px] text-muted-foreground">{item.brand || "MeyVeda"} · {item.weight || `${item.quantity} Qty`}</p>
                   </div>
-                  <span className="text-xs font-medium text-foreground flex-shrink-0">₹{item.price}</span>
+                  <span className="text-xs font-medium text-foreground flex-shrink-0">₹{item.price * item.quantity}</span>
                 </div>
               ))}
             </div>

@@ -2,43 +2,86 @@
 
 import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
-
-const ADMIN_EMAIL = "admin@meyveda.com";
-const ADMIN_PASSWORD = "Admin@2026";
+import { createClient } from "@/lib/supabase";
 
 export default function AdminLoginPage() {
   const router = useRouter();
+  const supabase = createClient();
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [showPassword, setShowPassword] = useState(false);
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
+  
+  const [stats, setStats] = useState({
+    practitioners: 0,
+    clinics: 0,
+    patients: 0,
+    medicines: 0,
+  });
 
   useEffect(() => {
     try {
       const stored = localStorage.getItem("mv_admin");
       if (stored) router.replace("/admin/dashboard");
     } catch {}
-  }, [router]);
 
-  function handleLogin(e: React.FormEvent) {
+    async function fetchStats() {
+      const [pRes, cRes, patRes, mRes] = await Promise.all([
+        supabase.from("practitioners").select("*", { count: "exact", head: true }),
+        supabase.from("clinics").select("*", { count: "exact", head: true }),
+        supabase.from("patients").select("*", { count: "exact", head: true }),
+        supabase.from("medicines").select("*", { count: "exact", head: true }),
+      ]);
+
+      setStats({
+        practitioners: pRes.count || 0,
+        clinics: cRes.count || 0,
+        patients: patRes.count || 0,
+        medicines: mRes.count || 0,
+      });
+    }
+
+    fetchStats();
+  }, [router, supabase]);
+
+  async function handleLogin(e: React.FormEvent) {
     e.preventDefault();
     setError("");
     setLoading(true);
-    setTimeout(() => {
-      if (email === ADMIN_EMAIL && password === ADMIN_PASSWORD) {
-        localStorage.setItem("mv_admin", JSON.stringify({
-          name: "MeyVeda Admin",
-          email,
-          role: "admin",
-          loginAt: new Date().toISOString(),
-        }));
-        router.push("/admin/dashboard");
-      } else {
-        setError("Invalid email or password.");
-        setLoading(false);
-      }
-    }, 800);
+
+    const { data: authData, error: authError } = await supabase.auth.signInWithPassword({
+      email,
+      password,
+    });
+
+    if (authError || !authData.user) {
+      setError(authError?.message || "Invalid credentials.");
+      setLoading(false);
+      return;
+    }
+
+    const { data: userData, error: userError } = await supabase
+      .from("users")
+      .select("role")
+      .eq("id", authData.user.id)
+      .single();
+
+    if (userError || (userData?.role !== "super_admin" && userData?.role !== "clinic_admin")) {
+      setError("Unauthorised. Admin access required.");
+      await supabase.auth.signOut();
+      setLoading(false);
+      return;
+    }
+
+    localStorage.setItem("mv_admin", JSON.stringify({
+      name: "MeyVeda Admin",
+      email,
+      role: userData.role,
+      loginAt: new Date().toISOString(),
+    }));
+    
+    router.push("/admin/dashboard");
   }
 
   return (
@@ -63,10 +106,10 @@ export default function AdminLoginPage() {
           </div>
           <div className="mt-10 grid grid-cols-2 gap-4">
             {[
-              { label: "Practitioners", value: "89" },
-              { label: "Hospitals", value: "24" },
-              { label: "Patients", value: "1,247" },
-              { label: "Medicines", value: "340+" },
+              { label: "Practitioners", value: stats.practitioners },
+              { label: "Hospitals", value: stats.clinics },
+              { label: "Patients", value: stats.patients },
+              { label: "Medicines", value: stats.medicines },
             ].map((s) => (
               <div key={s.label} className="bg-white/5 rounded-2xl p-4">
                 <p className="text-white font-bold text-xl font-display">{s.value}</p>
@@ -142,14 +185,6 @@ export default function AdminLoginPage() {
               {loading ? "Signing in…" : "Sign In to Admin Panel"}
             </button>
           </form>
-
-          <div className="mt-6 bg-ivory-deep border border-border rounded-xl p-3.5">
-            <p className="text-[11px] text-muted-foreground leading-relaxed">
-              <span className="font-semibold text-foreground">Demo credentials</span><br />
-              Email: admin@meyveda.com<br />
-              Password: Admin@2026
-            </p>
-          </div>
         </div>
       </div>
     </div>

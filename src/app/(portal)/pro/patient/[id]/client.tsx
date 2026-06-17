@@ -2,8 +2,9 @@
 
 import Link from "next/link";
 import { useParams } from "next/navigation";
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { cn } from "@/lib/utils";
+import { createClient } from "@/lib/supabase";
 
 type Tab = "intake" | "vitals" | "medical-history" | "history" | "care-team" | "reports";
 
@@ -11,6 +12,23 @@ type VitalsRecord = {
   date: string; doctor: string; doctorInitials: string; isYou?: boolean;
   bpSys: number; bpDia: number; pulse: number; temp: number;
   spo2: number; rr: number; weight: number; height: number;
+};
+
+type VisitRecord = {
+  id: string;
+  date: string; time: string; duration: string;
+  mode: "video" | "clinic";
+  doctor: string; specialty: string; doctorInitials: string; isYou?: boolean;
+  chiefComplaint: string;
+  soap: { S: string; O: string; A: string; P: string };
+  diagnosis: string;
+  vitals: { bpSys: number; bpDia: number; pulse: number; temp: number; spo2: number; rr: number; weight: number; height: number } | null;
+  medications: { name: string; dose: string; frequency: string; anupana: string; system: string }[];
+  investigations: string[];
+  referrals: { specialty: string; urgency: string }[];
+  followUpDate: string | null;
+  followUpInstructions: string;
+  type: "initial" | "follow-up" | "review" | "urgent";
 };
 
 function vStat(key: string, n: number): "normal" | "warning" | "alert" {
@@ -33,453 +51,376 @@ function trend(curr: number, prev: number, positive: "up" | "down"): { arrow: st
   return { arrow: up ? "↑" : "↓", color: good ? "text-herb-green" : "text-amber-600" };
 }
 
-const PATIENTS: Record<string, {
-  name: string; age: number; gender: string; phone: string;
-  abha: string | null; prakriti: string; reason: string;
-  mode: "video" | "clinic"; time: string; symptoms: string[];
-  duration: string;
-}> = {
-  p1: {
-    name: "Rohit Kumar", age: 32, gender: "Male", phone: "+91 98765 43210",
-    abha: "rohit@abha", prakriti: "Vata-Pitta",
-    reason: "Digestive issues and chronic fatigue for 3 weeks",
-    mode: "video", time: "4:30 PM",
-    symptoms: ["Fatigue", "Bloating", "Poor digestion", "Disturbed sleep", "Low appetite"],
-    duration: "3 weeks · Gradually worsening",
-  },
-  p2: {
-    name: "Meera Patel", age: 45, gender: "Female", phone: "+91 87654 32109",
-    abha: "meera@abha", prakriti: "Pitta-Kapha",
-    reason: "Joint pain and reduced mobility in knees and hips",
-    mode: "clinic", time: "5:00 PM",
-    symptoms: ["Joint pain", "Morning stiffness", "Reduced mobility", "Swelling"],
-    duration: "6 months · Worsening in winters",
-  },
-  p3: {
-    name: "Suresh Rao", age: 58, gender: "Male", phone: "+91 76543 21098",
-    abha: null, prakriti: "Kapha",
-    reason: "Chronic skin condition — recurring patches since last year",
-    mode: "video", time: "5:30 PM",
-    symptoms: ["Dry patches", "Itching", "Redness", "Scaling"],
-    duration: "1 year · Recurring episodes",
-  },
-};
+interface SocialHistory {
+  occupation: string;
+  marital: string;
+  tobacco: string;
+  alcohol: string;
+  diet: string;
+  exercise: string;
+  notes?: string;
+}
 
-type VisitRecord = {
-  id: string;
-  date: string; time: string; duration: string;
-  mode: "video" | "clinic";
-  doctor: string; specialty: string; doctorInitials: string; isYou?: boolean;
-  chiefComplaint: string;
-  soap: { S: string; O: string; A: string; P: string };
-  diagnosis: string;
-  vitals: { bpSys: number; bpDia: number; pulse: number; temp: number; spo2: number; rr: number; weight: number; height: number } | null;
-  medications: { name: string; dose: string; frequency: string; anupana: string; system: string }[];
-  investigations: string[];
-  referrals: { specialty: string; urgency: string }[];
-  followUpDate: string | null;
-  followUpInstructions: string;
-  type: "initial" | "follow-up" | "review" | "urgent";
-};
-
-const VISITS: Record<string, VisitRecord[]> = {
-  p1: [
-    {
-      id: "v1-4", date: "05 Jun 2026", time: "4:30 PM", duration: "28 min", mode: "video",
-      doctor: "Dr. Aditi Shastri", specialty: "Ayurveda", doctorInitials: "AS", isYou: true,
-      type: "follow-up",
-      chiefComplaint: "Persistent bloating and fatigue — not improving despite previous Rx",
-      soap: {
-        S: "Patient reports continued abdominal bloating after meals, fatigue by 3–4 PM daily. Sleep has improved marginally (6–6.5 hrs). Appetite remains poor in the mornings. Stress at work ongoing. Reports cold extremities and occasional headache.",
-        O: "Pulse (Nadi): Vata predominant, irregular rhythm. Tongue: slightly coated, Ama present. Abdomen: mild distension. BP 118/76, Pulse 72 bpm, SpO₂ 98%, Temp 98.6°F, Wt 72 kg.",
-        A: "Vataja Grahani with persistent Ama accumulation. Agni (digestive fire) remains weak. Anxiety contributing to Vata aggravation. Triphala + Ashwagandha regimen partially effective — dose adjustment needed. Add Brahmi Ghrita for Medhya (cognitive) support.",
-        P: "Increase Ashwagandha to 5g BD. Add Brahmi Ghrita 5ml OD with warm milk at bedtime. Continue Triphala. Advise warm water fasting for 1 day this week. Dinacharya: Abhyanga 3x/week. Avoid raw cold foods. Yoga: Pavanamuktasana sequence daily.",
-      },
-      diagnosis: "Vataja Grahani (IBS) with Ama — follow-up, dose escalation",
-      vitals: { bpSys: 118, bpDia: 76, pulse: 72, temp: 98.6, spo2: 98, rr: 16, weight: 72, height: 175 },
-      medications: [
-        { name: "Ashwagandha Churna",  dose: "5g",    frequency: "Twice daily with warm milk",     anupana: "Warm milk",  system: "Ayurveda" },
-        { name: "Triphala Churna",     dose: "3g",    frequency: "Bedtime with warm water",         anupana: "Warm water", system: "Ayurveda" },
-        { name: "Brahmi Ghrita",       dose: "5ml",   frequency: "Once daily at bedtime",           anupana: "Warm milk",  system: "Ayurveda" },
-      ],
-      investigations: ["LFT", "CBC"],
-      referrals: [],
-      followUpDate: "05 Jul 2026",
-      followUpInstructions: "Review LFT + CBC results. Reassess Agni. Consider Panchakarma eval if no improvement.",
-    },
-    {
-      id: "v1-3", date: "28 May 2026", time: "6:00 PM", duration: "22 min", mode: "video",
-      doctor: "Dr. Rajan Menon", specialty: "Homeopathy", doctorInitials: "RM",
-      type: "follow-up",
-      chiefComplaint: "Sleep disturbance, generalised anxiety, palpitations at night",
-      soap: {
-        S: "Patient unable to sleep before 1:30 AM. Wakes at 3–4 AM with anxious thoughts. Palpitations noted 2–3x/week at night. Work deadline stress. No chest pain or breathlessness. Appetite slightly suppressed.",
-        O: "Alert and oriented. Anxious affect. BP 116/74, HR 70 bpm, SpO₂ 98%. No peripheral oedema. Respiratory clear.",
-        A: "Stress-induced anxiety with sleep disruption and nocturnal palpitations. Homeopathic picture: Nux Vomica type (fastidious, overworked, stimulant-seeking). Passiflora Q for sleep support.",
-        P: "Nux Vomica 30C 4 pellets twice daily x 4 weeks. Passiflora Q 10 drops in water at bedtime. Counsel: reduce screen time after 9 PM, avoid coffee after 3 PM. Breathing exercises (4-7-8).",
-      },
-      diagnosis: "Stress-induced anxiety with insomnia and nocturnal palpitations",
-      vitals: { bpSys: 116, bpDia: 74, pulse: 70, temp: 98.5, spo2: 98, rr: 15, weight: 72, height: 175 },
-      medications: [
-        { name: "Nux Vomica 30C",  dose: "4 pellets", frequency: "Twice daily",  anupana: "Plain water", system: "Homeopathy" },
-        { name: "Passiflora Q",    dose: "10 drops",  frequency: "Bedtime",      anupana: "Water",       system: "Homeopathy" },
-      ],
-      investigations: [],
-      referrals: [],
-      followUpDate: "28 Jun 2026",
-      followUpInstructions: "Reassess sleep quality and anxiety levels. Adjust potency if insufficient response.",
-    },
-    {
-      id: "v1-2", date: "14 Apr 2026", time: "5:00 PM", duration: "32 min", mode: "video",
-      doctor: "Dr. Aditi Shastri", specialty: "Ayurveda", doctorInitials: "AS", isYou: true,
-      type: "follow-up",
-      chiefComplaint: "Bloating after meals, irregular bowel habits, persistent fatigue, low mood",
-      soap: {
-        S: "Reports bloating 30–60 min after meals, alternating constipation and loose stools, fatigue by afternoon. Low mood linked to work stress. Weight unchanged. Sleep 5–6 hrs.",
-        O: "Nadi: Vata irregular. Tongue: white coating, mild tremor. Abdomen: distension, tympanic. BP 122/80, Pulse 76, SpO₂ 97%, Temp 98.4°F, Wt 73 kg.",
-        A: "Vataja Grahani progressing with emotional overlay. Agni remains compromised. Prakriti re-confirmed Vata-Pitta. Starter Ashwagandha partially effective — needs dose increase and adjunct therapy.",
-        P: "Increase Ashwagandha to 3g BD (from 1g). Add Jeerakadyarishta 15ml twice daily after meals. Dietary: Vata-pacifying diet strictly. Lifestyle: sleep by 10:30 PM, reduce travel.",
-      },
-      diagnosis: "Vataja Grahani — dose escalation, emotional overlay",
-      vitals: { bpSys: 122, bpDia: 80, pulse: 76, temp: 98.4, spo2: 97, rr: 17, weight: 73, height: 175 },
-      medications: [
-        { name: "Ashwagandha Churna",   dose: "3g",    frequency: "Twice daily after meals", anupana: "Warm milk",  system: "Ayurveda" },
-        { name: "Jeerakadyarishta",     dose: "15ml",  frequency: "Twice daily after meals", anupana: "Equal water", system: "Ayurveda" },
-      ],
-      investigations: ["HbA1c", "Vitamin D3"],
-      referrals: [],
-      followUpDate: "05 Jun 2026",
-      followUpInstructions: "Review Vit D and HbA1c. Monitor mood and bowel habits. Consider stress counselling referral.",
-    },
-    {
-      id: "v1-1", date: "18 Feb 2026", time: "3:30 PM", duration: "45 min", mode: "clinic",
-      doctor: "Dr. Aditi Shastri", specialty: "Ayurveda", doctorInitials: "AS", isYou: true,
-      type: "initial",
-      chiefComplaint: "First visit — digestive issues for 3 months, chronic fatigue, general wellness",
-      soap: {
-        S: "Patient presents with 3-month history of bloating, irregular bowel habits, fatigue, and poor sleep. Works in IT, night shifts 2–3x/week. Diet mostly processed and irregular. No significant past history. No current medications. Family history: father has T2DM.",
-        O: "Prakriti assessment: Vata-Pitta (Vata dominant). Nadi: irregular, Vata quality. Tongue: slightly dry, mild tremor. Abdomen: mild distension. BP 120/78, Pulse 74, SpO₂ 96%, Temp 99.1°F, Wt 74 kg, Ht 175 cm. BMI 24.2.",
-        A: "Vataja Grahani (IBS, Vata-dominant digestive disorder) with Agni dushti. Lifestyle factors heavily contributing. Initial Ama accumulation. Vata-Pitta Prakriti with stress as primary trigger.",
-        P: "Start with Ashwagandha Churna 1g OD (mild dose). Advise Vata-pacifying diet: warm, cooked, oily, avoid raw/cold food. Dinacharya: Abhyanga self-massage, early bedtime. Yoga: Surya Namaskar 6 rounds. Review in 8 weeks.",
-      },
-      diagnosis: "Vataja Grahani (IBS, Vata dominant) — Initial presentation and Prakriti assessment",
-      vitals: { bpSys: 120, bpDia: 78, pulse: 74, temp: 99.1, spo2: 96, rr: 18, weight: 74, height: 175 },
-      medications: [
-        { name: "Ashwagandha Churna", dose: "1g", frequency: "Once daily at bedtime", anupana: "Warm milk", system: "Ayurveda" },
-      ],
-      investigations: ["CBC", "LFT", "Thyroid (TSH + T3 + T4)", "Vitamin D3", "Vitamin B12"],
-      referrals: [],
-      followUpDate: "14 Apr 2026",
-      followUpInstructions: "Review investigation results. Assess Agni improvement. Adjust formulation based on response.",
-    },
-  ],
-  p2: [
-    {
-      id: "v2-3", date: "01 Jun 2026", time: "5:00 PM", duration: "35 min", mode: "clinic",
-      doctor: "Dr. Aditi Shastri", specialty: "Ayurveda", doctorInitials: "AS", isYou: true,
-      type: "follow-up",
-      chiefComplaint: "Bilateral knee pain worsening — difficulty climbing stairs, morning stiffness > 45 min",
-      soap: {
-        S: "Morning stiffness lasting 45–60 min. Pain VAS 6/10 at rest, 8/10 on stairs. Swelling in right knee. Reports mild improvement with Kanchanara Guggulu from previous Siddha Rx. On Amlodipine 5mg for hypertension (stable).",
-        O: "Gait: antalgic. Bilateral crepitus. Right knee mild effusion. ROM: flexion 100°. Nadi: Vata-Pitta. BP 138/88, Pulse 82, SpO₂ 97%, Temp 98.2°F, Wt 78 kg.",
-        A: "Sandhivata (Vata-dominant osteoarthritis) with Pitta-mediated inflammation. Ama in Sandhi (joint spaces). Weight at 78kg — obesity exacerbating mechanical load. Combined AYUSH approach with existing Siddha Rx appropriate.",
-        P: "Add Maharasnadi Kashayam 15ml twice daily before meals. Add Rasna Saptakam 10ml OD. Local: Mahanarayan Taila Abhyanga to knees twice daily. Dietary: anti-inflammatory Pitta diet, no nightshades. Weight management target: 72kg. Physiotherapy 3x/week.",
-      },
-      diagnosis: "Sandhivata (Bilateral Knee OA) — Pitta-Vata mixed, Ama involvement",
-      vitals: { bpSys: 138, bpDia: 88, pulse: 82, temp: 98.2, spo2: 97, rr: 17, weight: 78, height: 162 },
-      medications: [
-        { name: "Maharasnadi Kashayam", dose: "15ml", frequency: "Twice daily before meals", anupana: "Warm water", system: "Ayurveda" },
-        { name: "Rasna Saptakam",       dose: "10ml", frequency: "Once daily",               anupana: "Warm water", system: "Ayurveda" },
-        { name: "Shallaki (Boswellia)", dose: "400mg",frequency: "Thrice daily with meals",   anupana: "Water",      system: "Ayurveda" },
-      ],
-      investigations: ["ESR + CRP", "Uric Acid", "X-ray Bilateral Knees (standing)"],
-      referrals: [{ specialty: "Orthopedics", urgency: "routine" }],
-      followUpDate: "01 Jul 2026",
-      followUpInstructions: "Review X-ray + inflammatory markers. Reassess pain score. Consider Panchakarma (Janu Basti) if no improvement.",
-    },
-    {
-      id: "v2-2", date: "15 May 2026", time: "11:00 AM", duration: "20 min", mode: "clinic",
-      doctor: "Dr. Priya Varma", specialty: "Siddha", doctorInitials: "PV",
-      type: "review",
-      chiefComplaint: "Follow-up — joint pain, referred by physio for Siddha opinion",
-      soap: {
-        S: "Joint pain with inflammation visible in knees. Reports mild improvement with diet changes. Morning stiffness present. No fever. BP controlled on Amlodipine.",
-        O: "Bilateral knee mild effusion. Thambira Chendooram indicated. BP 142/90, Pulse 85, SpO₂ 96%, Temp 98.0°F, Wt 79 kg.",
-        A: "Pitta-Vata vatham affecting Sandhi. Siddha approach: reduce Pitta-mediated inflammation first. Kanchanara Guggulu appropriate cross-system.",
-        P: "Start Kanchanara Guggulu 2 tabs twice daily. Siddha dietary protocol: avoid sour, fermented, spicy foods. Warm Castor oil application locally.",
-      },
-      diagnosis: "Pitta-Vata aggravation — joint inflammation (Siddha assessment)",
-      vitals: { bpSys: 142, bpDia: 90, pulse: 85, temp: 98.0, spo2: 96, rr: 18, weight: 79, height: 162 },
-      medications: [
-        { name: "Kanchanara Guggulu", dose: "2 tabs", frequency: "Twice daily with warm water", anupana: "Warm water", system: "Siddha" },
-      ],
-      investigations: [],
-      referrals: [],
-      followUpDate: "01 Jun 2026",
-      followUpInstructions: "Coordinate with Dr. Aditi's Ayurveda plan. Report any GI side effects.",
-    },
-    {
-      id: "v2-1", date: "20 Mar 2026", time: "10:30 AM", duration: "40 min", mode: "clinic",
-      doctor: "Dr. Aditi Shastri", specialty: "Ayurveda", doctorInitials: "AS", isYou: true,
-      type: "initial",
-      chiefComplaint: "Initial visit — bilateral knee pain, weight gain, joint stiffness",
-      soap: {
-        S: "6-month history of bilateral knee pain, worse on standing from sitting and on stairs. Morning stiffness ~30 min. Weight gain of 8kg in 2 years. Known hypertension on Amlodipine 5mg (stable). Post-hysterectomy 2019. Family history: mother has OA, father had CVD.",
-        O: "Prakriti: Pitta-Kapha. Nadi: Pitta-Kapha. Bilateral crepitus, mild synovial thickening. ROM limited. BP 136/86, Pulse 80, SpO₂ 97%, Temp 98.3°F, Wt 80 kg, Ht 162 cm. BMI 30.5.",
-        A: "Sandhivata with Ama accumulation. Kapha contributing to excess weight and joint loading. Pitta causing inflammatory component. Hypertension noted and monitored by allopathic physician — no change in that Rx.",
-        P: "Start Vata-Kapha pacifying diet. Weight reduction target 72kg. Abhyanga to joints with Dhanwantaram Taila. Begin yoga: Tadasana, Virabhadrasana, Setu Bandhasana. Start Punarnava Mandoora 2 tabs BD for Kapha and joint support.",
-      },
-      diagnosis: "Sandhivata (OA, bilateral knees) — Initial assessment, Pitta-Kapha Prakriti",
-      vitals: { bpSys: 136, bpDia: 86, pulse: 80, temp: 98.3, spo2: 97, rr: 16, weight: 80, height: 162 },
-      medications: [
-        { name: "Punarnava Mandoora", dose: "2 tabs", frequency: "Twice daily before meals", anupana: "Warm water", system: "Ayurveda" },
-      ],
-      investigations: ["CBC", "ESR + CRP", "Uric acid", "Lipid Panel", "Fasting Blood Sugar", "X-ray Knees"],
-      referrals: [],
-      followUpDate: "15 May 2026",
-      followUpInstructions: "Review investigation results. Assess weight progress. Adjust formulations.",
-    },
-  ],
-  p3: [
-    {
-      id: "v3-2", date: "20 May 2026", time: "6:00 PM", duration: "25 min", mode: "video",
-      doctor: "Dr. Aditi Shastri", specialty: "Ayurveda", doctorInitials: "AS", isYou: true,
-      type: "follow-up",
-      chiefComplaint: "Skin patches worsening — new lesions on scalp, itching intensified",
-      soap: {
-        S: "Patient reports new plaques on scalp and posterior elbows since last visit. Itching increased in evenings. Stress at work (pending retirement paperwork). HbA1c 6.8% (checked by cardiologist — stable). BP and cholesterol controlled on allopathic Rx.",
-        O: "Skin: erythematous silvery-scaled plaques on scalp (>5cm) and bilateral elbows. PASI score: ~8. Koebner phenomenon absent. Nadi: Kapha-Pitta. BP 128/82, Pulse 68, SpO₂ 97%, Temp 98.8°F, Wt 88 kg.",
-        A: "Kushtaroga (Psoriasis) — Kapha-Pitta type. Stress as major trigger (Vata involvement secondary). Metabolic syndrome (DM2 + HTN + dyslipidaemia) may be slowing healing. Systemic Shodhana (purification) needed alongside Shamana.",
-        P: "Continue Neem + Manjishtha. Add Khadirarishta 20ml twice daily after meals. External: Marichadi Taila topically to plaques at night. Advise: reduce stress, maintain low glycaemic diet. Review in 4 weeks.",
-      },
-      diagnosis: "Kushtaroga (Plaque Psoriasis) — Kapha-Pitta, stress-aggravated",
-      vitals: { bpSys: 128, bpDia: 82, pulse: 68, temp: 98.8, spo2: 97, rr: 15, weight: 88, height: 170 },
-      medications: [
-        { name: "Neem Capsule",      dose: "500mg", frequency: "Twice daily",              anupana: "Water",       system: "Ayurveda" },
-        { name: "Manjishtha Extract",dose: "500mg", frequency: "Once daily",               anupana: "Warm water",  system: "Ayurveda" },
-        { name: "Khadirarishta",     dose: "20ml",  frequency: "Twice daily after meals",  anupana: "Equal water", system: "Ayurveda" },
-      ],
-      investigations: ["HbA1c", "Lipid Panel", "CBC"],
-      referrals: [{ specialty: "Dermatology", urgency: "routine" }],
-      followUpDate: "20 Jun 2026",
-      followUpInstructions: "Review PASI score, check investigation results. Consider Panchakarma (Virechana) consult if no improvement.",
-    },
-    {
-      id: "v3-1", date: "10 Mar 2026", time: "5:30 PM", duration: "38 min", mode: "video",
-      doctor: "Dr. Aditi Shastri", specialty: "Ayurveda", doctorInitials: "AS", isYou: true,
-      type: "initial",
-      chiefComplaint: "First visit — recurring skin patches for 1 year, no improvement on allopathic treatment",
-      soap: {
-        S: "58M with 1-year history of recurring erythematous scaly plaques. Has tried steroid creams and salicylic acid lotions — partial temporary relief. Known T2DM (Metformin), HTN (Telmisartan), Dyslipidaemia (Rosuvastatin). Ex-smoker (quit 2012). Stress: recently retired.",
-        O: "Prakriti: Kapha. Nadi: Kapha-Pitta. Skin: silvery-scaled plaques over elbows and scalp. PASI: ~6. Tongue: coated, Kapha. BP 130/84, Pulse 70, SpO₂ 96%, Temp 98.5°F, Wt 90 kg, Ht 170 cm. BMI 31.1.",
-        A: "Kushtaroga — Kapha dominant psoriasis. Underlying Ama, metabolic toxin accumulation. DM + dyslipidaemia as Santarpana (excess nourishment) causes. Allopathic medications reviewed — no direct drug-AYUSH interaction of concern.",
-        P: "Start Panchatikta Ghrita 5ml OD before breakfast (Shodhana base). Neem capsules 500mg BD. Dietary: no dairy, no wheat, reduce sugar strictly. Lifestyle: stress management critical. Yoga: Pranayama (Anulom Vilom) 10 min daily.",
-      },
-      diagnosis: "Kushtaroga (Plaque Psoriasis) — Initial presentation, Kapha dominant, Ama accumulation",
-      vitals: { bpSys: 130, bpDia: 84, pulse: 70, temp: 98.5, spo2: 96, rr: 16, weight: 90, height: 170 },
-      medications: [
-        { name: "Panchatikta Ghrita", dose: "5ml",   frequency: "Once daily before breakfast", anupana: "Warm water", system: "Ayurveda" },
-        { name: "Neem Capsule",       dose: "500mg",  frequency: "Twice daily",                anupana: "Water",      system: "Ayurveda" },
-      ],
-      investigations: ["CBC", "LFT", "KFT", "HbA1c", "Lipid Panel"],
-      referrals: [],
-      followUpDate: "20 May 2026",
-      followUpInstructions: "Review all investigations. Assess Panchatikta Ghrita tolerance. Evaluate PASI change.",
-    },
-  ],
-};
-
-const CARE_TEAMS: Record<string, { id: string; name: string; initials: string; specialty: string; qualification: string; hprId: string; since: string; lastVisit: string; nextFollowUp: string; totalRx: number; isYou?: boolean }[]> = {
-  p1: [
-    { id: "doc-aditi", name: "Dr. Aditi Shastri", initials: "AS", specialty: "Ayurveda",   qualification: "BAMS, MD (Ayu)",  hprId: "HPR-4902-8822", since: "18 Feb 2026", lastVisit: "05 Jun 2026", nextFollowUp: "05 Jul 2026", totalRx: 2, isYou: true },
-    { id: "doc-rajan", name: "Dr. Rajan Menon",   initials: "RM", specialty: "Homeopathy", qualification: "BHMS, MD (Hom)", hprId: "HPR-3301-7654", since: "28 May 2026", lastVisit: "28 May 2026", nextFollowUp: "28 Jun 2026", totalRx: 1 },
-  ],
-  p2: [
-    { id: "doc-aditi", name: "Dr. Aditi Shastri", initials: "AS", specialty: "Ayurveda", qualification: "BAMS, MD (Ayu)",   hprId: "HPR-4902-8822", since: "20 Mar 2026", lastVisit: "01 Jun 2026", nextFollowUp: "01 Jul 2026", totalRx: 2, isYou: true },
-    { id: "doc-priya", name: "Dr. Priya Varma",   initials: "PV", specialty: "Siddha",   qualification: "BSMS, MD (Sid)", hprId: "HPR-6611-2290", since: "15 May 2026", lastVisit: "15 May 2026", nextFollowUp: "20 Jun 2026", totalRx: 1 },
-  ],
-  p3: [
-    { id: "doc-aditi", name: "Dr. Aditi Shastri", initials: "AS", specialty: "Ayurveda", qualification: "BAMS, MD (Ayu)", hprId: "HPR-4902-8822", since: "10 Mar 2026", lastVisit: "20 May 2026", nextFollowUp: "20 Jun 2026", totalRx: 2, isYou: true },
-  ],
-};
-
-const VITALS_HISTORY: Record<string, VitalsRecord[]> = {
-  p1: [
-    { date: "05 Jun 2026", doctor: "Dr. Aditi Shastri", doctorInitials: "AS", isYou: true,  bpSys: 118, bpDia: 76, pulse: 72, temp: 98.6, spo2: 98, rr: 16, weight: 72, height: 175 },
-    { date: "28 May 2026", doctor: "Dr. Rajan Menon",   doctorInitials: "RM",               bpSys: 116, bpDia: 74, pulse: 70, temp: 98.5, spo2: 98, rr: 15, weight: 72, height: 175 },
-    { date: "14 Apr 2026", doctor: "Dr. Aditi Shastri", doctorInitials: "AS", isYou: true,  bpSys: 122, bpDia: 80, pulse: 76, temp: 98.4, spo2: 97, rr: 17, weight: 73, height: 175 },
-    { date: "18 Feb 2026", doctor: "Dr. Aditi Shastri", doctorInitials: "AS", isYou: true,  bpSys: 120, bpDia: 78, pulse: 74, temp: 99.1, spo2: 96, rr: 18, weight: 74, height: 175 },
-  ],
-  p2: [
-    { date: "01 Jun 2026", doctor: "Dr. Aditi Shastri", doctorInitials: "AS", isYou: true,  bpSys: 138, bpDia: 88, pulse: 82, temp: 98.2, spo2: 97, rr: 17, weight: 78, height: 162 },
-    { date: "15 May 2026", doctor: "Dr. Priya Varma",   doctorInitials: "PV",               bpSys: 142, bpDia: 90, pulse: 85, temp: 98.0, spo2: 96, rr: 18, weight: 79, height: 162 },
-    { date: "20 Mar 2026", doctor: "Dr. Aditi Shastri", doctorInitials: "AS", isYou: true,  bpSys: 136, bpDia: 86, pulse: 80, temp: 98.3, spo2: 97, rr: 16, weight: 80, height: 162 },
-    { date: "15 Jan 2026", doctor: "Dr. Aditi Shastri", doctorInitials: "AS", isYou: true,  bpSys: 130, bpDia: 84, pulse: 78, temp: 98.1, spo2: 98, rr: 16, weight: 81, height: 162 },
-  ],
-  p3: [
-    { date: "20 May 2026", doctor: "Dr. Aditi Shastri", doctorInitials: "AS", isYou: true,  bpSys: 128, bpDia: 82, pulse: 68, temp: 98.8, spo2: 97, rr: 15, weight: 88, height: 170 },
-    { date: "10 Mar 2026", doctor: "Dr. Aditi Shastri", doctorInitials: "AS", isYou: true,  bpSys: 130, bpDia: 84, pulse: 70, temp: 98.5, spo2: 96, rr: 16, weight: 90, height: 170 },
-    { date: "15 Jan 2026", doctor: "Dr. Aditi Shastri", doctorInitials: "AS", isYou: true,  bpSys: 126, bpDia: 80, pulse: 66, temp: 98.6, spo2: 97, rr: 15, weight: 91, height: 170 },
-  ],
-};
+interface MedicalHistory {
+  allergies: any[];
+  medications: any[];
+  pmh: any[];
+  surgeries: any[];
+  family: any[];
+  social: SocialHistory;
+  immunizations: any[];
+}
 
 const REPORTS = [
-  { name: "CBC Report",            date: "10 Apr 2026", type: "Lab", size: "1.2 MB" },
-  { name: "Liver Function Test",   date: "10 Apr 2026", type: "Lab", size: "0.8 MB" },
-  { name: "Previous Prescription", date: "14 Apr 2026", type: "Rx",  size: "0.2 MB" },
+  { name: "Prakriti Analysis Report.pdf", date: "2026-05-15", type: "Prakriti", size: "1.2 MB" },
+  { name: "Liver Function Test (LFT).pdf", date: "2026-05-10", type: "Lab", size: "2.4 MB" },
+  { name: "CBC & Lipid Profile.pdf", date: "2026-04-20", type: "Lab", size: "1.8 MB" }
 ];
-
-type AllergyEntry = { allergen: string; type: "drug" | "food" | "environmental" | "other"; reaction: string; severity: "mild" | "moderate" | "severe" | "life-threatening"; since: string };
-type MedEntry     = { name: string; dose: string; frequency: string; system: "Ayurveda" | "Homeopathy" | "Siddha" | "Naturopathy" | "Allopathic" | "OTC"; prescribedBy: string; since: string; active: boolean };
-type PMHEntry     = { condition: string; year: string; status: "resolved" | "ongoing" | "managed"; notes: string };
-type SurgeryEntry = { procedure: string; year: string; hospital: string; notes?: string };
-type FamilyEntry  = { relation: string; condition: string; age?: string; notes?: string };
-type SocialHistory = { occupation: string; marital: string; tobacco: string; alcohol: string; diet: string; exercise: string; notes?: string };
-type ImmunEntry   = { vaccine: string; date: string; doses: string; status: "complete" | "partial" | "due" };
-
-const MEDICAL_HISTORY: Record<string, {
-  allergies: AllergyEntry[]; medications: MedEntry[]; pmh: PMHEntry[];
-  surgeries: SurgeryEntry[]; family: FamilyEntry[]; social: SocialHistory;
-  immunizations: ImmunEntry[];
-}> = {
-  p1: {
-    allergies: [
-      { allergen: "Sulfonamides",  type: "drug",  reaction: "Skin rash, pruritus",       severity: "moderate", since: "2018" },
-      { allergen: "Peanuts",       type: "food",  reaction: "Urticaria, swelling",        severity: "moderate", since: "Childhood" },
-    ],
-    medications: [
-      { name: "Ashwagandha Churna",  dose: "5g",    frequency: "Twice daily",   system: "Ayurveda",   prescribedBy: "Dr. Aditi Shastri", since: "May 2026",  active: true  },
-      { name: "Triphala Churna",     dose: "3g",    frequency: "Bedtime",       system: "Ayurveda",   prescribedBy: "Dr. Aditi Shastri", since: "May 2026",  active: true  },
-      { name: "Brahmi Ghrita",       dose: "5ml",   frequency: "Once daily",    system: "Ayurveda",   prescribedBy: "Dr. Aditi Shastri", since: "Jun 2026",  active: true  },
-      { name: "Nux Vomica 30C",      dose: "4 pellets", frequency: "Twice daily", system: "Homeopathy", prescribedBy: "Dr. Rajan Menon",   since: "May 2026",  active: true  },
-      { name: "Passiflora Q",        dose: "10 drops", frequency: "Bedtime",     system: "Homeopathy", prescribedBy: "Dr. Rajan Menon",   since: "May 2026",  active: true  },
-      { name: "Vitamin D3 (OTC)",    dose: "60k IU",  frequency: "Once weekly", system: "OTC",         prescribedBy: "Self",              since: "Mar 2026",  active: true  },
-    ],
-    pmh: [
-      { condition: "IBS — Irritable Bowel Syndrome", year: "2022", status: "ongoing",  notes: "Flares with stress" },
-      { condition: "Seasonal allergic rhinitis",      year: "2018", status: "managed",  notes: "Managed with antihistamines" },
-    ],
-    surgeries: [],
-    family: [
-      { relation: "Father", condition: "Type 2 Diabetes",  age: "58y", notes: "On insulin" },
-      { relation: "Mother", condition: "Hypothyroidism",    age: "55y" },
-    ],
-    social: {
-      occupation: "Software Engineer", marital: "Married",
-      tobacco: "None", alcohol: "Occasional (social)",
-      diet: "Non-vegetarian", exercise: "Walking 20 min/day",
-      notes: "High-stress work environment. Works night shifts 2–3x/week.",
-    },
-    immunizations: [
-      { vaccine: "COVID-19 (Covishield)",    date: "Aug 2021", doses: "2/2",  status: "complete" },
-      { vaccine: "COVID-19 Booster",         date: "Feb 2022", doses: "1/1",  status: "complete" },
-      { vaccine: "Hepatitis B",              date: "2019",     doses: "3/3",  status: "complete" },
-      { vaccine: "Influenza (Seasonal)",     date: "Oct 2025", doses: "Annual", status: "complete" },
-      { vaccine: "Tetanus (Td booster)",     date: "2021",     doses: "1/1",  status: "complete" },
-    ],
-  },
-  p2: {
-    allergies: [
-      { allergen: "Penicillin",      type: "drug",          reaction: "Anaphylaxis",           severity: "life-threatening", since: "2015" },
-      { allergen: "Dust mites",      type: "environmental", reaction: "Rhinitis, sneezing",    severity: "mild",             since: "2010" },
-      { allergen: "Shellfish",       type: "food",          reaction: "Urticaria, vomiting",   severity: "severe",           since: "2012" },
-    ],
-    medications: [
-      { name: "Maharasnadi Kashayam",    dose: "15ml",   frequency: "Twice daily before meals", system: "Ayurveda",  prescribedBy: "Dr. Aditi Shastri", since: "Jun 2026",  active: true  },
-      { name: "Kanchanara Guggulu",      dose: "2 tabs", frequency: "Twice daily",              system: "Siddha",    prescribedBy: "Dr. Priya Varma",   since: "May 2026",  active: true  },
-      { name: "Shallaki (Boswellia)",    dose: "400mg",  frequency: "Thrice daily with meals",  system: "Ayurveda",  prescribedBy: "Dr. Aditi Shastri", since: "Jun 2026",  active: true  },
-      { name: "Amlodipine 5mg",          dose: "5mg",    frequency: "Once daily (morning)",     system: "Allopathic", prescribedBy: "Dr. Kiran Shah",    since: "2020",      active: true  },
-      { name: "Paracetamol 500mg (OTC)", dose: "500mg",  frequency: "As needed for pain",       system: "OTC",        prescribedBy: "Self",              since: "On demand", active: false },
-    ],
-    pmh: [
-      { condition: "Hypertension",      year: "2020", status: "managed", notes: "Amlodipine 5mg daily" },
-      { condition: "Gestational DM",    year: "2004", status: "resolved", notes: "During pregnancy, resolved post-delivery" },
-    ],
-    surgeries: [
-      { procedure: "Appendectomy",         year: "2000", hospital: "Apollo Hospitals, Mumbai" },
-      { procedure: "Hysterectomy (partial)", year: "2019", hospital: "Lilavati Hospital, Mumbai", notes: "Uterine fibroids" },
-    ],
-    family: [
-      { relation: "Father", condition: "Hypertension, CVD",   age: "Deceased at 68" },
-      { relation: "Mother", condition: "Osteoarthritis",       age: "78y", notes: "Bilateral knee replacement" },
-      { relation: "Sister", condition: "Rheumatoid Arthritis", age: "48y" },
-    ],
-    social: {
-      occupation: "School teacher (retired)", marital: "Married",
-      tobacco: "None", alcohol: "None",
-      diet: "Vegetarian", exercise: "Physiotherapy 3x/week, light walking",
-      notes: "Post-retirement. Sedentary lifestyle. Weight management counselled.",
-    },
-    immunizations: [
-      { vaccine: "COVID-19 (Covaxin)",     date: "Sep 2021", doses: "2/2",  status: "complete" },
-      { vaccine: "COVID-19 Booster",       date: "Mar 2022", doses: "1/1",  status: "complete" },
-      { vaccine: "Hepatitis B",            date: "2018",     doses: "2/3",  status: "partial"  },
-      { vaccine: "Influenza (Seasonal)",   date: "Oct 2025", doses: "Annual", status: "complete" },
-      { vaccine: "Pneumococcal (PPSV23)",  date: "Due",      doses: "0/1",  status: "due"      },
-    ],
-  },
-  p3: {
-    allergies: [
-      { allergen: "NSAIDs (Aspirin, Ibuprofen)", type: "drug", reaction: "Gastric bleed risk",     severity: "severe",   since: "2017" },
-      { allergen: "Latex",                       type: "other", reaction: "Contact dermatitis",     severity: "moderate", since: "2015" },
-    ],
-    medications: [
-      { name: "Neem Capsule",               dose: "500mg", frequency: "Twice daily",              system: "Ayurveda",   prescribedBy: "Dr. Aditi Shastri", since: "May 2026",  active: true  },
-      { name: "Khadirarishta",              dose: "20ml",  frequency: "Twice daily after meals",  system: "Ayurveda",   prescribedBy: "Dr. Aditi Shastri", since: "May 2026",  active: true  },
-      { name: "Manjishtha Extract",         dose: "500mg", frequency: "Once daily",               system: "Ayurveda",   prescribedBy: "Dr. Aditi Shastri", since: "May 2026",  active: true  },
-      { name: "Telmisartan 40mg",           dose: "40mg",  frequency: "Once daily (morning)",     system: "Allopathic", prescribedBy: "Dr. Nair (cardiologist)", since: "2016", active: true },
-      { name: "Rosuvastatin 10mg",          dose: "10mg",  frequency: "Once daily (night)",       system: "Allopathic", prescribedBy: "Dr. Nair (cardiologist)", since: "2018", active: true },
-      { name: "Metformin 500mg",            dose: "500mg", frequency: "Twice daily with meals",   system: "Allopathic", prescribedBy: "Dr. Nair",         since: "2018",      active: true  },
-    ],
-    pmh: [
-      { condition: "Hypertension",          year: "2016", status: "managed",  notes: "Telmisartan 40mg" },
-      { condition: "Dyslipidaemia",         year: "2018", status: "managed",  notes: "Rosuvastatin 10mg" },
-      { condition: "Type 2 Diabetes",       year: "2018", status: "managed",  notes: "Diet + Metformin, HbA1c 6.8%" },
-      { condition: "Psoriasis (Plaque)",    year: "2025", status: "ongoing",  notes: "Scalp + elbows, under AYUSH management" },
-    ],
-    surgeries: [
-      { procedure: "Right knee arthroscopy", year: "2021", hospital: "Manipal Hospitals, Bangalore", notes: "Meniscal tear" },
-    ],
-    family: [
-      { relation: "Father", condition: "Hypertension, Stroke",    age: "Deceased at 72" },
-      { relation: "Mother", condition: "Type 2 Diabetes",         age: "80y" },
-      { relation: "Brother", condition: "Psoriasis (Psoriatic Arthritis)", age: "54y" },
-    ],
-    social: {
-      occupation: "Retired Bank Manager", marital: "Married",
-      tobacco: "Ex-smoker (quit 2012, 20 pack-years)", alcohol: "Rare",
-      diet: "Non-vegetarian, low-salt, low-sugar diet",
-      exercise: "Evening walk 30 min · 5x/week",
-      notes: "Regular follow-ups with cardiologist. HbA1c monitored every 3 months.",
-    },
-    immunizations: [
-      { vaccine: "COVID-19 (Covishield)",  date: "Jul 2021",  doses: "2/2",  status: "complete" },
-      { vaccine: "COVID-19 Booster",       date: "Jan 2022",  doses: "1/1",  status: "complete" },
-      { vaccine: "Hepatitis B",            date: "2015",      doses: "3/3",  status: "complete" },
-      { vaccine: "Influenza (Seasonal)",   date: "Nov 2025",  doses: "Annual", status: "complete" },
-      { vaccine: "Pneumococcal (PPSV23)", date: "2020",       doses: "1/1",  status: "complete" },
-      { vaccine: "Shingles (Shingrix)",    date: "Due",       doses: "0/2",  status: "due"      },
-    ],
-  },
-};
 
 export default function PatientIntakeClient() {
   const params = useParams();
   const id = (params.id as string) || "p1";
-  const patient = PATIENTS[id] ?? PATIENTS.p1;
-  const visits = VISITS[id] ?? VISITS.p1;
-  const careTeam = CARE_TEAMS[id] ?? CARE_TEAMS.p1;
-  const vitalsHistory = VITALS_HISTORY[id] ?? VITALS_HISTORY.p1;
-  const latestVitals = vitalsHistory[0];
-  const prevVitals = vitalsHistory[1];
-  const medHistory = MEDICAL_HISTORY[id] ?? MEDICAL_HISTORY.p1;
+
+  const [patient, setPatient] = useState<any>(null);
+  const [visits, setVisits] = useState<any[]>([]);
+  const [careTeam, setCareTeam] = useState<any[]>([]);
+  const [vitalsHistory, setVitalsHistory] = useState<any[]>([]);
+  const [medHistory, setMedHistory] = useState<MedicalHistory>({
+    allergies: [],
+    medications: [],
+    pmh: [],
+    surgeries: [],
+    family: [],
+    social: { occupation: "", marital: "", tobacco: "", alcohol: "", diet: "", exercise: "" },
+    immunizations: []
+  });
+
+  const latestVitals = vitalsHistory[0] ?? {
+    date: "No record", doctor: "N/A", doctorInitials: "N/A",
+    bpSys: 120, bpDia: 80, pulse: 72, temp: 98.6, spo2: 98, rr: 16, weight: 70, height: 170
+  };
+  const prevVitals = vitalsHistory[1] ?? null;
+
   const [activeTab, setActiveTab] = useState<Tab>("intake");
-  const [expandedVisit, setExpandedVisit] = useState<string | null>(visits[0]?.id ?? null);
+  const [expandedVisit, setExpandedVisit] = useState<string | null>(null);
   const [visitSoapTab, setVisitSoapTab]   = useState<"S" | "O" | "A" | "P">("S");
   const [openMHSection, setOpenMHSection] = useState<Record<string, boolean>>({
     allergies: true, medications: true, pmh: false, surgeries: false, family: false, social: false, immunizations: false,
   });
+  const [isLoading, setIsLoading] = useState(true);
+
+  // Initialize expandedVisit when visits are loaded/initialized
+  useEffect(() => {
+    if (visits && visits.length > 0 && !expandedVisit) {
+      setExpandedVisit(visits[0].id);
+    }
+  }, [visits, expandedVisit]);
+
+  useEffect(() => {
+    async function loadData() {
+      try {
+        const supabase = createClient();
+        
+        let cleanId = id;
+        if (id === "p1") cleanId = "c0000000-0000-0000-0000-000000000001";
+        else if (id === "p2") cleanId = "c0000000-0000-0000-0000-000000000002";
+        else if (id === "p3") cleanId = "c0000000-0000-0000-0000-000000000003";
+
+        // Validate cleanId is a UUID
+        const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+        if (!uuidRegex.test(cleanId)) {
+          setIsLoading(false);
+          return;
+        }
+
+        // 1. Fetch Patient
+        const { data: dbPat, error: patError } = await supabase
+          .from("patients")
+          .select(`
+            id,
+            full_name,
+            date_of_birth,
+            gender,
+            prakriti,
+            user_id,
+            user:users (
+              mobile,
+              email
+            )
+          `)
+          .eq("id", cleanId)
+          .single();
+
+        if (patError || !dbPat) {
+          console.error("Error fetching patient:", patError);
+          setIsLoading(false);
+          return;
+        }
+
+        // 2. Fetch ABHA link
+        const { data: dbAbha } = await supabase
+          .from("abha_links")
+          .select("abha_id, abha_address")
+          .eq("user_id", dbPat.user_id)
+          .maybeSingle();
+
+        // 3. Fetch today's appointment or latest appointment for today's details
+        const today = new Date().toISOString().split("T")[0];
+        const { data: dbAppts } = await supabase
+          .from("appointments")
+          .select(`
+            id,
+            mode,
+            scheduled_date,
+            scheduled_time,
+            reason_for_visit,
+            status
+          `)
+          .eq("patient_id", cleanId)
+          .order("scheduled_date", { ascending: false })
+          .order("scheduled_time", { ascending: false });
+
+        const todayAppt = dbAppts?.find((a: any) => a.scheduled_date === today) || dbAppts?.[0];
+
+        // Format patient info
+        let age = 0;
+        if (dbPat.date_of_birth) {
+          const birthDate = new Date(dbPat.date_of_birth);
+          age = new Date().getFullYear() - birthDate.getFullYear();
+        }
+
+        const formatTime = (timeStr: string) => {
+          if (!timeStr) return "";
+          const [h, m] = timeStr.split(":");
+          const hours = parseInt(h, 10);
+          const period = hours >= 12 ? "PM" : "AM";
+          const h12 = hours % 12 || 12;
+          return `${h12}:${m} ${period}`;
+        };
+
+        const updatedPatient = {
+          name: dbPat.full_name || "Unknown",
+          age,
+          gender: dbPat.gender ? dbPat.gender.charAt(0).toUpperCase() + dbPat.gender.slice(1) : "Unknown",
+          phone: (Array.isArray(dbPat.user) ? dbPat.user[0]?.mobile : (dbPat.user as any)?.mobile) || "",
+          abha: dbAbha ? `${dbAbha.abha_id} (${dbAbha.abha_address || ""})` : null,
+          prakriti: dbPat.prakriti || "Vata-Pitta",
+          reason: todayAppt?.reason_for_visit || "Routine check-up",
+          mode: (todayAppt?.mode === "video" ? "video" : "clinic") as "video" | "clinic",
+          time: todayAppt ? formatTime(todayAppt.scheduled_time) : "N/A",
+          symptoms: todayAppt?.reason_for_visit ? [todayAppt.reason_for_visit] : [],
+          duration: todayAppt ? "Scheduled" : "N/A",
+        };
+
+        setPatient(updatedPatient);
+
+        // 4. Fetch Consultations, EMR Notes, and Prescriptions
+        const { data: dbConsults } = await supabase
+          .from("consultations")
+          .select(`
+            id,
+            mode,
+            created_at,
+            appointment:appointments (
+              id,
+              scheduled_date,
+              scheduled_time
+            ),
+            practitioner:practitioners (
+              id,
+              full_name,
+              qualifications,
+              specializations
+            ),
+            emr_note:emr_notes (
+              chief_complaint,
+              history_present,
+              past_medical_hx,
+              family_history,
+              allergies,
+              current_medications,
+              objective_findings,
+              assessment,
+              plan
+            ),
+            prescriptions (
+              id,
+              dietary_advice,
+              lifestyle_advice,
+              physical_activity,
+              followup_date,
+              prescription_items (
+                id,
+                medicine_name,
+                dose,
+                frequency,
+                duration_days,
+                anupana,
+                special_instructions
+              )
+            )
+          `)
+          .eq("patient_id", cleanId)
+          .order("created_at", { ascending: false });
+
+        if (dbConsults && dbConsults.length > 0) {
+          const formattedVisits: VisitRecord[] = dbConsults.map((c: any) => {
+            const dateStr = c.appointment?.scheduled_date
+              ? new Date(c.appointment.scheduled_date).toLocaleDateString("en-US", { day: "numeric", month: "short", year: "numeric" })
+              : new Date(c.created_at).toLocaleDateString("en-US", { day: "numeric", month: "short", year: "numeric" });
+
+            const timeStr = c.appointment?.scheduled_time ? formatTime(c.appointment.scheduled_time) : "N/A";
+
+            const medications = c.prescriptions?.[0]?.prescription_items?.map((item: any) => ({
+              name: item.medicine_name,
+              dose: item.dose,
+              frequency: item.frequency,
+              anupana: item.anupana || "",
+              system: c.practitioner?.specializations?.[0] || "Ayurveda"
+            })) || [];
+
+            // Parse SOAP
+            const emr = c.emr_note || {};
+            const soap = {
+              S: emr.history_present || "No subjective notes",
+              O: emr.objective_findings || "No objective notes",
+              A: emr.assessment || "No assessment notes",
+              P: emr.plan || "No plan notes"
+            };
+
+            // Parse vitals if they are inside objective findings as text/json
+            let vitals = null;
+            if (emr.objective_findings) {
+              try {
+                if (emr.objective_findings.trim().startsWith("{")) {
+                  const parsed = JSON.parse(emr.objective_findings);
+                  if (parsed.bpSys || parsed.pulse) {
+                    vitals = {
+                      bpSys: parsed.bpSys || 120,
+                      bpDia: parsed.bpDia || 80,
+                      pulse: parsed.pulse || 72,
+                      temp: parsed.temp || 98.6,
+                      spo2: parsed.spo2 || 98,
+                      rr: parsed.rr || 16,
+                      weight: parsed.weight || 70,
+                      height: parsed.height || 170
+                    };
+                  }
+                }
+              } catch (e) {
+                // Ignore parsing errors
+              }
+            }
+
+            const docName = c.practitioner?.full_name || "Unknown Practitioner";
+            const initials = docName.split(" ").filter((w: string) => w).map((w: string) => w[0]).join("").slice(0, 2).toUpperCase();
+
+            return {
+              id: c.id,
+              date: dateStr,
+              time: timeStr,
+              duration: "20 min",
+              mode: c.mode || "clinic",
+              doctor: docName,
+              specialty: c.practitioner?.specializations?.[0] || "Ayurveda",
+              doctorInitials: initials,
+              isYou: false,
+              chiefComplaint: emr.chief_complaint || "Routine consultation",
+              soap,
+              diagnosis: emr.assessment || "Routine check-up",
+              vitals,
+              medications,
+              investigations: [],
+              referrals: [],
+              followUpDate: c.prescriptions?.[0]?.followup_date || null,
+              followUpInstructions: c.prescriptions?.[0]?.lifestyle_advice || "",
+              type: "initial"
+            };
+          });
+
+          setVisits(formattedVisits);
+          setExpandedVisit(formattedVisits[0].id);
+
+          // Build vitals history from visits that have vitals
+          const vitalsList = formattedVisits
+            .filter(v => v.vitals)
+            .map(v => ({
+              date: v.date,
+              doctor: v.doctor,
+              doctorInitials: v.doctorInitials,
+              isYou: v.isYou,
+              ...v.vitals!
+            }));
+          
+          if (vitalsList.length > 0) {
+            setVitalsHistory(vitalsList);
+          }
+
+          // Build active medications from recent visit prescriptions
+          const activeMeds = formattedVisits.flatMap(v => 
+            v.medications.map(m => {
+              const sysVal = m.system;
+              const system = (["Ayurveda", "Naturopathy", "Siddha", "Homeopathy", "Allopathic", "OTC"].includes(sysVal)
+                ? sysVal
+                : "Ayurveda") as "Ayurveda" | "Naturopathy" | "Siddha" | "Homeopathy" | "Allopathic" | "OTC";
+              return {
+                name: m.name,
+                dose: m.dose,
+                frequency: m.frequency,
+                system: system,
+                prescribedBy: v.doctor,
+                since: v.date,
+                active: true
+              };
+            })
+          );
+
+          if (activeMeds.length > 0) {
+            setMedHistory((prev: any) => ({
+              ...prev,
+              medications: activeMeds
+            }));
+          }
+
+          // Build care team from doctors visited
+          const team = Array.from(new Set(formattedVisits.map(v => v.doctor))).map(name => {
+            const visit = formattedVisits.find(v => v.doctor === name)!;
+            return {
+              id: visit.id,
+              name: name,
+              initials: visit.doctorInitials,
+              specialty: visit.specialty,
+              qualification: "Registered Practitioner",
+              hprId: "HPR-VERIFIED",
+              since: formattedVisits[formattedVisits.length - 1].date,
+              lastVisit: visit.date,
+              nextFollowUp: visit.followUpDate || "N/A",
+              totalRx: visit.medications.length,
+              isYou: visit.isYou
+            };
+          });
+
+          setCareTeam(team);
+        }
+
+      } catch (err) {
+        console.error("Error loading patient details:", err);
+      } finally {
+        setIsLoading(false);
+      }
+    }
+    loadData();
+  }, [id]);
+
   const statStyle = { normal: "bg-herb-green/10 text-herb-green border-herb-green/20", warning: "bg-amber-50 text-amber-700 border-amber-200", alert: "bg-red-50 text-red-600 border-red-200" };
+
+  if (isLoading || !patient) {
+    return (
+      <div className="flex items-center justify-center min-h-[400px]">
+        <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-herb-green"></div>
+      </div>
+    );
+  }
 
   return (
     <div className="px-4 sm:px-6 lg:px-8 py-6 max-w-7xl mx-auto">
@@ -566,7 +507,7 @@ export default function PatientIntakeClient() {
             <div className="bg-white rounded-2xl border border-border p-5">
               <h3 className="font-semibold text-foreground text-sm mb-3">Self-Reported Symptoms</h3>
               <div className="flex flex-wrap gap-2">
-                {patient.symptoms.map((s) => (
+                {patient.symptoms.map((s: string) => (
                   <span key={s} className="text-xs px-3 py-1.5 bg-amber-50 text-amber-700 rounded-full border border-amber-100">
                     {s}
                   </span>
@@ -1311,7 +1252,7 @@ export default function PatientIntakeClient() {
                                 <p className="text-xs text-muted-foreground italic">No medications prescribed</p>
                               ) : (
                                 <div className="space-y-2">
-                                  {visit.medications.map((m, mi) => (
+                                  {visit.medications.map((m: any, mi: number) => (
                                     <div key={mi} className="flex items-start gap-2">
                                       <div className={cn("w-1.5 h-1.5 rounded-full mt-1.5 flex-shrink-0",
                                         m.system === "Ayurveda"   ? "bg-herb-green" :
@@ -1337,7 +1278,7 @@ export default function PatientIntakeClient() {
                                     Investigations Ordered
                                   </p>
                                   <div className="flex flex-wrap gap-1.5">
-                                    {visit.investigations.map(inv => (
+                                    {visit.investigations.map((inv: string) => (
                                       <span key={inv} className="text-[10px] font-medium bg-blue-50 text-blue-700 px-2.5 py-1 rounded-full border border-blue-100">
                                         {inv}
                                       </span>
@@ -1349,7 +1290,7 @@ export default function PatientIntakeClient() {
                               {visit.referrals.length > 0 && (
                                 <div>
                                   <p className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground mb-2">Referrals</p>
-                                  {visit.referrals.map((r, ri) => (
+                                  {visit.referrals.map((r: any, ri: number) => (
                                     <div key={ri} className="flex items-center gap-2">
                                       <span className={cn("text-[10px] font-bold px-2 py-0.5 rounded-full capitalize",
                                         r.urgency === "emergent" ? "bg-red-50 text-red-600" : r.urgency === "urgent" ? "bg-amber-50 text-amber-700" : "bg-muted text-muted-foreground"
@@ -1458,11 +1399,11 @@ export default function PatientIntakeClient() {
                   </div>
                   <div className="ml-7 space-y-1.5">
                     {visits
-                      .filter(v => v.doctor === doc.name)
+                      .filter((v: any) => v.doctor === doc.name)
                       .slice(0, 1)
-                      .map((v, i) => (
+                      .map((v: any, i: number) => (
                         <div key={i} className="text-xs text-muted-foreground bg-background rounded-lg px-3 py-2 border border-border">
-                          <span className="font-medium text-foreground">Rx ({v.date}):</span> {v.medications.map(m => m.name).join(" + ") || "—"}
+                          <span className="font-medium text-foreground">Rx ({v.date}):</span> {v.medications.map((m: any) => m.name).join(" + ") || "—"}
                         </div>
                       ))}
                   </div>
@@ -1475,7 +1416,7 @@ export default function PatientIntakeClient() {
 
       {activeTab === "reports" && (
         <div className="space-y-3">
-          {REPORTS.map((r, i) => (
+          {REPORTS.map((r: any, i: number) => (
             <div key={i} className="bg-white rounded-2xl border border-border p-4 flex items-center gap-4">
               <div className="w-10 h-10 rounded-xl bg-herb-green/10 flex items-center justify-center flex-shrink-0">
                 <span className="text-lg">{r.type === "Lab" ? "🧪" : "📄"}</span>

@@ -2,65 +2,11 @@
 
 import { useState } from "react";
 import { cn } from "@/lib/utils";
+import { useAdminPractitioners, useAdminClinics } from "@/lib/hooks";
+import { verifyPractitioner, createPractitioner } from "@/lib/queries";
 
-type Status = "verified" | "pending" | "suspended";
+type Status = "verified" | "pending" | "rejected" | "under_review";
 type PracticeType = "independent" | "hospital" | "both";
-
-type Practitioner = {
-  id: string; name: string; specialty: string; qualification: string;
-  hprId: string; email: string; phone: string;
-  practiceType: PracticeType;
-  clinicName: string;
-  hospitalIds: string[];
-  city: string; status: Status; joined: string;
-};
-
-const HOSPITALS_LIST = [
-  { id: "h1", name: "Arya Vaidya Sala Kottakkal", city: "Malappuram" },
-  { id: "h2", name: "National Institute of Ayurveda", city: "Jaipur" },
-  { id: "h3", name: "Holistic Wellness Hub", city: "Bengaluru" },
-  { id: "h4", name: "AyurVita Panchakarma Centre", city: "Kochi" },
-  { id: "h5", name: "Homeo Care Clinic", city: "Chennai" },
-];
-
-const INITIAL: Practitioner[] = [
-  {
-    id: "p1", name: "Dr. Aditi Shastri", specialty: "Ayurveda", qualification: "BAMS, MD (Ayu)",
-    hprId: "HPR-4902-8822", email: "aditi@example.com", phone: "+91 98765 43210",
-    practiceType: "both", clinicName: "Holistic Wellness Clinic", hospitalIds: ["h3"],
-    city: "Bengaluru", status: "verified", joined: "12 Jan 2026",
-  },
-  {
-    id: "p2", name: "Dr. Rajan Mehta", specialty: "Homeopathy", qualification: "BHMS",
-    hprId: "HPR-3301-9943", email: "rajan@example.com", phone: "+91 87654 32109",
-    practiceType: "independent", clinicName: "Mehta Homeo Centre", hospitalIds: [],
-    city: "Mumbai", status: "verified", joined: "18 Feb 2026",
-  },
-  {
-    id: "p3", name: "Dr. Kavya Menon", specialty: "Panchakarma", qualification: "BAMS",
-    hprId: "HPR-2204-7712", email: "kavya@example.com", phone: "+91 76543 21098",
-    practiceType: "hospital", clinicName: "", hospitalIds: ["h4"],
-    city: "Kochi", status: "pending", joined: "05 Jun 2026",
-  },
-  {
-    id: "p4", name: "Dr. Farhan Sheikh", specialty: "Unani", qualification: "BUMS",
-    hprId: "HPR-4405-8832", email: "farhan@example.com", phone: "+91 65432 10987",
-    practiceType: "independent", clinicName: "Unani Health Hub", hospitalIds: [],
-    city: "Hyderabad", status: "pending", joined: "02 Jun 2026",
-  },
-  {
-    id: "p5", name: "Dr. Sunita Rao", specialty: "Yoga & Naturopathy", qualification: "BNYS",
-    hprId: "HPR-1102-5521", email: "sunita@example.com", phone: "+91 54321 09876",
-    practiceType: "hospital", clinicName: "", hospitalIds: ["h3"],
-    city: "Pune", status: "verified", joined: "28 Mar 2026",
-  },
-  {
-    id: "p6", name: "Dr. Priya Krishnan", specialty: "Siddha", qualification: "BSMS",
-    hprId: "HPR-5506-2217", email: "priya@example.com", phone: "+91 43210 98765",
-    practiceType: "independent", clinicName: "Siddha Wellness", hospitalIds: [],
-    city: "Chennai", status: "suspended", joined: "15 Jan 2026",
-  },
-];
 
 const SPECIALTIES = ["Ayurveda", "Homeopathy", "Yoga & Naturopathy", "Unani", "Siddha", "Panchakarma", "Kayachikitsa"];
 const QUALIFICATIONS = ["BAMS", "BHMS", "BUMS", "BNYS", "BSMS", "MD (Ayu)", "MS (Ayu)"];
@@ -68,7 +14,8 @@ const QUALIFICATIONS = ["BAMS", "BHMS", "BUMS", "BNYS", "BSMS", "MD (Ayu)", "MS 
 const STATUS_STYLE: Record<Status, string> = {
   verified: "bg-herb-green/10 text-herb-green",
   pending: "bg-amber-50 text-amber-700",
-  suspended: "bg-red-50 text-red-600",
+  under_review: "bg-amber-50 text-amber-700",
+  rejected: "bg-red-50 text-red-600",
 };
 
 const PRACTICE_LABEL: Record<PracticeType, string> = {
@@ -94,24 +41,39 @@ const EMPTY_FORM: {
 };
 
 export default function AdminPractitionersPage() {
-  const [practitioners, setPractitioners] = useState<Practitioner[]>(INITIAL);
+  const { data: practitioners, loading, refetch } = useAdminPractitioners();
+  const { data: clinics, loading: clinicsLoading } = useAdminClinics();
+
   const [search, setSearch] = useState("");
   const [filterStatus, setFilterStatus] = useState<"all" | Status>("all");
   const [showForm, setShowForm] = useState(false);
   const [form, setForm] = useState(EMPTY_FORM);
   const [saving, setSaving] = useState(false);
 
-  const filtered = practitioners.filter((p) => {
+  if (loading || clinicsLoading) {
+    return (
+      <div className="flex items-center justify-center min-h-[60vh]">
+        <div className="w-8 h-8 border-4 border-herb-green border-t-transparent rounded-full animate-spin"></div>
+      </div>
+    );
+  }
+
+  const filtered = (practitioners ?? []).filter((p) => {
     const matchSearch =
-      p.name.toLowerCase().includes(search.toLowerCase()) ||
-      p.specialty.toLowerCase().includes(search.toLowerCase()) ||
-      p.city.toLowerCase().includes(search.toLowerCase());
-    const matchStatus = filterStatus === "all" || p.status === filterStatus;
+      p.full_name?.toLowerCase().includes(search.toLowerCase()) ||
+      p.disciplines?.some((d: string) => d.toLowerCase().includes(search.toLowerCase())) ||
+      p.hpr_id?.toLowerCase().includes(search.toLowerCase());
+    const matchStatus = filterStatus === "all" || p.verification_status === filterStatus;
     return matchSearch && matchStatus;
   });
 
-  function changeStatus(id: string, status: Status) {
-    setPractitioners((prev) => prev.map((p) => (p.id === id ? { ...p, status } : p)));
+  async function changeStatus(id: string, status: "verified" | "rejected") {
+    try {
+      await verifyPractitioner(id, status);
+      refetch();
+    } catch (err: any) {
+      alert(err.message ?? "Failed to change status");
+    }
   }
 
   function toggleHospital(hid: string) {
@@ -123,35 +85,46 @@ export default function AdminPractitionersPage() {
     }));
   }
 
-  function handleAdd(e: React.FormEvent) {
+  async function handleAdd(e: React.FormEvent) {
     e.preventDefault();
     setSaving(true);
-    setTimeout(() => {
-      const newP: Practitioner = {
-        id: `p${Date.now()}`,
-        ...form,
-        status: "pending",
-        joined: new Date().toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" }),
-      };
-      setPractitioners((prev) => [newP, ...prev]);
+    try {
+      await createPractitioner({
+        name: form.name,
+        specialty: form.specialty,
+        qualification: form.qualification,
+        hprId: form.hprId,
+        email: form.email,
+        phone: form.phone,
+        practiceType: form.practiceType,
+        clinicName: form.clinicName,
+        hospitalIds: form.hospitalIds,
+        city: form.city,
+      });
       setForm(EMPTY_FORM);
       setShowForm(false);
+      refetch();
+    } catch (err: any) {
+      alert(err.message ?? "Failed to create practitioner");
+    } finally {
       setSaving(false);
-    }, 800);
+    }
   }
 
-  function practiceDisplay(p: Practitioner) {
-    const hospitals = p.hospitalIds
-      .map((hid) => HOSPITALS_LIST.find((h) => h.id === hid)?.name ?? hid)
-      .join(", ");
-    if (p.practiceType === "independent") return p.clinicName || "—";
-    if (p.practiceType === "hospital") return hospitals || "—";
-    const parts = [p.clinicName, hospitals].filter(Boolean);
-    return parts.join(" + ") || "—";
+  function practiceDisplay(p: any) {
+    const clinicsList = p.clinic_practitioners ?? [];
+    if (clinicsList.length === 0) return "—";
+    return clinicsList.map((cp: any) => cp.clinic?.name).filter(Boolean).join(", ");
   }
 
   const showClinicField = form.practiceType === "independent" || form.practiceType === "both";
   const showHospitalField = form.practiceType === "hospital" || form.practiceType === "both";
+
+  const hospitalsList = (clinics ?? []).map((c: any) => ({
+    id: c.id,
+    name: c.name,
+    city: c.city,
+  }));
 
   return (
     <div className="px-4 sm:px-6 lg:px-8 py-6 max-w-7xl mx-auto">
@@ -159,7 +132,7 @@ export default function AdminPractitionersPage() {
         <div>
           <h1 className="font-display text-2xl font-bold text-foreground">Practitioners</h1>
           <p className="text-sm text-muted-foreground mt-0.5">
-            {practitioners.length} registered · {practitioners.filter((p) => p.status === "pending").length} pending verification
+            {practitioners?.length ?? 0} registered · {practitioners?.filter((p: any) => p.verification_status === "pending").length ?? 0} pending verification
           </p>
         </div>
         <button
@@ -174,13 +147,13 @@ export default function AdminPractitionersPage() {
       <div className="flex flex-wrap gap-3 mb-5">
         <input
           type="text"
-          placeholder="Search by name, specialty, city…"
+          placeholder="Search by name, specialty, HPR ID…"
           value={search}
           onChange={(e) => setSearch(e.target.value)}
           className="flex-1 min-w-48 px-3.5 py-2 text-sm border border-border rounded-xl focus:outline-none focus:ring-2 focus:ring-herb-green/20 focus:border-herb-green/50 bg-white"
         />
         <div className="flex gap-1.5">
-          {(["all", "verified", "pending", "suspended"] as const).map((s) => (
+          {(["all", "verified", "pending", "rejected"] as const).map((s) => (
             <button
               key={s}
               onClick={() => setFilterStatus(s)}
@@ -213,57 +186,65 @@ export default function AdminPractitionersPage() {
               </tr>
             </thead>
             <tbody className="divide-y divide-border">
-              {filtered.map((p) => (
-                <tr key={p.id} className="hover:bg-background transition-colors">
-                  <td className="px-5 py-3.5">
-                    <div className="flex items-center gap-3">
-                      <div className="w-8 h-8 rounded-xl bg-herb-green/10 flex items-center justify-center flex-shrink-0">
-                        <span className="text-herb-green text-xs font-bold">{p.name.split(" ")[1]?.[0] ?? p.name[0]}</span>
+              {filtered.map((p) => {
+                const userObj = Array.isArray(p.user) ? p.user[0] : p.user;
+                const contact = userObj?.email || userObj?.mobile || "—";
+                const spec = (p.specializations ?? [])[0] ?? (p.disciplines ?? [])[0] ?? "General";
+                const qual = (p.qualifications ?? [])[0] ?? "—";
+                const practiceType = (p.clinic_practitioners?.length > 0) ? "hospital" : "independent";
+                const city = p.clinic_practitioners?.[0]?.clinic?.city ?? "—";
+                return (
+                  <tr key={p.id} className="hover:bg-background transition-colors">
+                    <td className="px-5 py-3.5">
+                      <div className="flex items-center gap-3">
+                        <div className="w-8 h-8 rounded-xl bg-herb-green/10 flex items-center justify-center flex-shrink-0">
+                          <span className="text-herb-green text-xs font-bold">{p.full_name?.split(" ").slice(-1)[0]?.[0] ?? "P"}</span>
+                        </div>
+                        <div>
+                          <p className="font-medium text-foreground">{p.full_name}</p>
+                          <p className="text-[10px] text-muted-foreground">{contact}</p>
+                        </div>
                       </div>
-                      <div>
-                        <p className="font-medium text-foreground">{p.name}</p>
-                        <p className="text-[10px] text-muted-foreground">{p.email}</p>
+                    </td>
+                    <td className="px-4 py-3.5">
+                      <p className="text-foreground">{spec}</p>
+                      <p className="text-[10px] text-muted-foreground">{qual}</p>
+                    </td>
+                    <td className="px-4 py-3.5 font-mono text-xs text-muted-foreground">{p.hpr_id ?? "—"}</td>
+                    <td className="px-4 py-3.5">
+                      <span className={cn("text-[10px] font-semibold px-2 py-0.5 rounded-full", PRACTICE_STYLE[practiceType])}>
+                        {PRACTICE_LABEL[practiceType]}
+                      </span>
+                      <p className="text-[10px] text-muted-foreground mt-0.5 max-w-[160px] truncate">{practiceDisplay(p)}</p>
+                    </td>
+                    <td className="px-4 py-3.5 text-xs text-foreground">{city}</td>
+                    <td className="px-4 py-3.5">
+                      <span className={cn("text-[10px] font-semibold px-2.5 py-1 rounded-full capitalize", STATUS_STYLE[p.verification_status as Status] ?? "bg-gray-100 text-gray-700")}>
+                        {p.verification_status}
+                      </span>
+                    </td>
+                    <td className="px-5 py-3.5 text-right">
+                      <div className="flex items-center justify-end gap-2">
+                        {p.verification_status !== "verified" && (
+                          <button onClick={() => changeStatus(p.id, "verified")} className="text-[10px] font-semibold text-herb-green hover:underline">
+                            Verify
+                          </button>
+                        )}
+                        {p.verification_status !== "rejected" && (
+                          <button onClick={() => changeStatus(p.id, "rejected")} className="text-[10px] font-semibold text-red-500 hover:underline">
+                            Reject / Suspend
+                          </button>
+                        )}
+                        {p.verification_status === "rejected" && (
+                          <button onClick={() => changeStatus(p.id, "verified")} className="text-[10px] font-semibold text-amber-600 hover:underline">
+                            Reinstate
+                          </button>
+                        )}
                       </div>
-                    </div>
-                  </td>
-                  <td className="px-4 py-3.5">
-                    <p className="text-foreground">{p.specialty}</p>
-                    <p className="text-[10px] text-muted-foreground">{p.qualification}</p>
-                  </td>
-                  <td className="px-4 py-3.5 font-mono text-xs text-muted-foreground">{p.hprId}</td>
-                  <td className="px-4 py-3.5">
-                    <span className={cn("text-[10px] font-semibold px-2 py-0.5 rounded-full", PRACTICE_STYLE[p.practiceType])}>
-                      {PRACTICE_LABEL[p.practiceType]}
-                    </span>
-                    <p className="text-[10px] text-muted-foreground mt-0.5 max-w-[160px] truncate">{practiceDisplay(p)}</p>
-                  </td>
-                  <td className="px-4 py-3.5 text-xs text-foreground">{p.city}</td>
-                  <td className="px-4 py-3.5">
-                    <span className={cn("text-[10px] font-semibold px-2.5 py-1 rounded-full capitalize", STATUS_STYLE[p.status])}>
-                      {p.status}
-                    </span>
-                  </td>
-                  <td className="px-5 py-3.5 text-right">
-                    <div className="flex items-center justify-end gap-2">
-                      {p.status !== "verified" && (
-                        <button onClick={() => changeStatus(p.id, "verified")} className="text-[10px] font-semibold text-herb-green hover:underline">
-                          Verify
-                        </button>
-                      )}
-                      {p.status !== "suspended" && (
-                        <button onClick={() => changeStatus(p.id, "suspended")} className="text-[10px] font-semibold text-red-500 hover:underline">
-                          Suspend
-                        </button>
-                      )}
-                      {p.status === "suspended" && (
-                        <button onClick={() => changeStatus(p.id, "verified")} className="text-[10px] font-semibold text-amber-600 hover:underline">
-                          Reinstate
-                        </button>
-                      )}
-                    </div>
-                  </td>
-                </tr>
-              ))}
+                    </td>
+                  </tr>
+                );
+              })}
               {filtered.length === 0 && (
                 <tr>
                   <td colSpan={7} className="px-5 py-12 text-center text-sm text-muted-foreground">No practitioners found</td>
@@ -420,7 +401,7 @@ export default function AdminPractitionersPage() {
                       Hospital Affiliation{form.practiceType === "both" ? " (select all that apply)" : ""}
                     </label>
                     <div className="space-y-2">
-                      {HOSPITALS_LIST.map((h) => {
+                      {hospitalsList.map((h) => {
                         const selected = form.hospitalIds.includes(h.id);
                         return (
                           <button

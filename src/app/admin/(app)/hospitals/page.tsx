@@ -2,6 +2,8 @@
 
 import { useState } from "react";
 import { cn } from "@/lib/utils";
+import { useAdminClinics } from "@/lib/hooks";
+import { createClinic, toggleClinicActive } from "@/lib/queries";
 
 type HospitalStatus = "active" | "inactive" | "pending";
 type HospitalType = "AYUSH Hospital" | "Wellness Centre" | "Panchakarma Centre" | "Homeopathy Clinic" | "Naturopathy Centre" | "Multi-specialty AYUSH";
@@ -12,14 +14,6 @@ type Hospital = {
   hfrId: string; phone: string; email: string;
   specialties: string[]; status: HospitalStatus; added: string;
 };
-
-const INITIAL: Hospital[] = [
-  { id: "h1", name: "Arya Vaidya Sala Kottakkal", type: "AYUSH Hospital", address: "P.O. Kottakkal", city: "Malappuram", state: "Kerala", pin: "676503", beds: 200, hfrId: "HFR-KL-2201", phone: "+91 483 274 2216", email: "avs@kottakkal.org", specialties: ["Ayurveda", "Panchakarma"], status: "active", added: "10 Jan 2026" },
-  { id: "h2", name: "National Institute of Ayurveda", type: "AYUSH Hospital", address: "Madau Singh Road, Amer Road", city: "Jaipur", state: "Rajasthan", pin: "302002", beds: 300, hfrId: "HFR-RJ-1101", phone: "+91 141 263 5816", email: "nia@gov.in", specialties: ["Ayurveda", "Kayachikitsa", "Shalya"], status: "active", added: "15 Jan 2026" },
-  { id: "h3", name: "Holistic Wellness Hub", type: "Wellness Centre", address: "123 MG Road", city: "Bengaluru", state: "Karnataka", pin: "560001", beds: 30, hfrId: "HFR-KA-3305", phone: "+91 80 4567 8901", email: "info@holisticwellness.in", specialties: ["Yoga", "Naturopathy", "Ayurveda"], status: "active", added: "20 Feb 2026" },
-  { id: "h4", name: "AyurVita Panchakarma Centre", type: "Panchakarma Centre", address: "45 MG Road", city: "Kochi", state: "Kerala", pin: "682001", beds: 20, hfrId: "HFR-KL-4412", phone: "+91 484 234 5678", email: "info@ayurvita.com", specialties: ["Panchakarma", "Ayurveda"], status: "pending", added: "01 Jun 2026" },
-  { id: "h5", name: "Homeo Care Clinic", type: "Homeopathy Clinic", address: "78 Anna Salai", city: "Chennai", state: "Tamil Nadu", pin: "600002", beds: 10, hfrId: "HFR-TN-5521", phone: "+91 44 2345 6789", email: "care@homeocare.in", specialties: ["Homeopathy"], status: "inactive", added: "05 Mar 2026" },
-];
 
 const HOSPITAL_TYPES: HospitalType[] = ["AYUSH Hospital", "Wellness Centre", "Panchakarma Centre", "Homeopathy Clinic", "Naturopathy Centre", "Multi-specialty AYUSH"];
 const SPECIALTY_OPTIONS = ["Ayurveda", "Homeopathy", "Yoga", "Naturopathy", "Unani", "Siddha", "Panchakarma", "Kayachikitsa"];
@@ -33,12 +27,45 @@ const STATUS_STYLE: Record<HospitalStatus, string> = {
 const EMPTY_FORM = { name: "", type: "AYUSH Hospital" as HospitalType, address: "", city: "", state: "", pin: "", beds: "", hfrId: "", phone: "", email: "", specialties: [] as string[] };
 
 export default function AdminHospitalsPage() {
-  const [hospitals, setHospitals] = useState<Hospital[]>(INITIAL);
+  const { data: clinics, loading, refetch } = useAdminClinics();
   const [search, setSearch] = useState("");
   const [filterStatus, setFilterStatus] = useState<"all" | HospitalStatus>("all");
   const [showForm, setShowForm] = useState(false);
   const [form, setForm] = useState(EMPTY_FORM);
   const [saving, setSaving] = useState(false);
+
+  if (loading) {
+    return (
+      <div className="flex items-center justify-center min-h-[60vh]">
+        <div className="w-8 h-8 border-4 border-herb-green border-t-transparent rounded-full animate-spin"></div>
+      </div>
+    );
+  }
+
+  const hospitals: Hospital[] = (clinics ?? []).map((c) => {
+    const practitionersList = c.clinic_practitioners ?? [];
+    const specialties = Array.from(new Set(
+      practitionersList.flatMap((cp: any) => cp.practitioner?.disciplines ?? [])
+    )) as string[];
+    if (specialties.length === 0) specialties.push("General AYUSH");
+
+    return {
+      id: c.id,
+      name: c.name,
+      type: "Wellness Centre",
+      address: c.address_line1 || "—",
+      city: c.city,
+      state: c.state,
+      pin: c.pin_code,
+      beds: 0,
+      hfrId: c.hfr_id || "Pending",
+      phone: c.phone || "—",
+      email: "info@" + c.name.toLowerCase().replace(/\s+/g, "") + ".in",
+      specialties,
+      status: c.is_active ? "active" : "inactive",
+      added: "Live DB",
+    };
+  });
 
   const filtered = hospitals.filter((h) => {
     const matchSearch = h.name.toLowerCase().includes(search.toLowerCase()) ||
@@ -48,10 +75,13 @@ export default function AdminHospitalsPage() {
     return matchSearch && matchStatus;
   });
 
-  function toggleStatus(id: string) {
-    setHospitals((prev) => prev.map((h) =>
-      h.id === id ? { ...h, status: h.status === "active" ? "inactive" : "active" } : h
-    ));
+  async function toggleStatus(id: string, currentStatus: string) {
+    try {
+      await toggleClinicActive(id, currentStatus !== "active");
+      refetch();
+    } catch (err: any) {
+      alert(err.message ?? "Failed to toggle status");
+    }
   }
 
   function toggleSpecialty(sp: string) {
@@ -63,23 +93,27 @@ export default function AdminHospitalsPage() {
     }));
   }
 
-  function handleAdd(e: React.FormEvent) {
+  async function handleAdd(e: React.FormEvent) {
     e.preventDefault();
     setSaving(true);
-    setTimeout(() => {
-      const newH: Hospital = {
-        id: `h${Date.now()}`,
-        ...form,
-        beds: Number(form.beds),
-        specialties: form.specialties.length ? form.specialties : ["Ayurveda"],
-        status: "pending",
-        added: new Date().toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" }),
-      };
-      setHospitals((prev) => [newH, ...prev]);
+    try {
+      await createClinic({
+        name: form.name,
+        address: form.address,
+        city: form.city,
+        state: form.state,
+        pin: form.pin,
+        hfrId: form.hfrId,
+        phone: form.phone,
+      });
       setForm(EMPTY_FORM);
       setShowForm(false);
+      refetch();
+    } catch (err: any) {
+      alert(err.message ?? "Failed to create hospital/clinic");
+    } finally {
       setSaving(false);
-    }, 800);
+    }
   }
 
   return (
@@ -143,7 +177,7 @@ export default function AdminHospitalsPage() {
                     </span>
                   </td>
                   <td className="px-5 py-3.5 text-right">
-                    <button onClick={() => toggleStatus(h.id)} className={cn("text-[10px] font-semibold hover:underline", h.status === "active" ? "text-red-500" : "text-herb-green")}>
+                    <button onClick={() => toggleStatus(h.id, h.status)} className={cn("text-[10px] font-semibold hover:underline", h.status === "active" ? "text-red-500" : "text-herb-green")}>
                       {h.status === "active" ? "Deactivate" : "Activate"}
                     </button>
                   </td>

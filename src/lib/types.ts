@@ -17,6 +17,9 @@ export interface Practitioner {
   location: string;
   qualifications: string[];
   about: string;
+  clinicFee?: number;
+  slotDuration?: number;
+  bufferMin?: number;
 }
 
 export interface Appointment {

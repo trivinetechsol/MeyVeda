@@ -1,11 +1,20 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import Link from "next/link";
 import { ABHABadge } from "@/components/Badges";
 import { Progress } from "@/components/ui/progress";
 import { useAuth } from "@/contexts/auth-context";
+import {
+  usePatientProfile,
+  useDinacharyaTasks,
+  useHealthRecords,
+  usePatientPrescriptions,
+  usePractitionerAnalytics,
+  usePractitionerPrescriptions,
+} from "@/lib/hooks";
 import { cn } from "@/lib/utils";
+import type { DinacharTask } from "@/lib/types";
 
 const BLOOD_GROUPS = ["A+", "A−", "B+", "B−", "AB+", "AB−", "O+", "O−"];
 const GENDERS = ["Male", "Female", "Non-binary", "Prefer not to say"];
@@ -28,23 +37,112 @@ const PRACTITIONER_MENU = [
   { icon: "📄", label: "Terms & Privacy Policy", desc: "Legal documentation", href: "/profile/terms" },
 ];
 
-const PATIENT_STATS = [
-  { label: "Consultations", value: "12" },
-  { label: "Prescriptions", value: "8" },
-  { label: "Days Active", value: "420" },
-];
-
-const PRACTITIONER_STATS = [
-  { label: "Patients Seen", value: "248" },
-  { label: "Prescriptions", value: "183" },
-  { label: "Rating", value: "4.9★" },
-];
+/* Stats are now derived from context/DB — no hardcoded arrays */
 
 export default function ProfilePage() {
   const { user, updateUser, logout } = useAuth();
+  const { data: profile } = usePatientProfile(user?.id);
+  const { data: dbTasks } = useDinacharyaTasks(user?.id);
+
+  // Patient details hooks
+  const { data: patientRecords } = useHealthRecords(user?.role === "patient" ? user?.id : undefined);
+  const { data: patientPrescriptions } = usePatientPrescriptions(user?.role === "patient" ? user?.id : undefined);
+
+  // Practitioner details hooks
+  const { data: pracAnalytics } = usePractitionerAnalytics(user?.role === "practitioner" ? user?.id : undefined);
+  const { data: pracPrescriptions } = usePractitionerPrescriptions(user?.role === "practitioner" ? user?.id : undefined);
+
+  const [tasks, setTasks] = useState<DinacharTask[]>([]);
+
+  useEffect(() => {
+    if (dbTasks && dbTasks.length > 0) setTasks(dbTasks);
+  }, [dbTasks]);
+
+  const completedCount = tasks.filter((t) => t.done).length;
+  const progressPct = tasks.length > 0 ? Math.round((completedCount / tasks.length) * 100) : 0;
+  const wellnessScore = tasks.length > 0 ? progressPct : 74;
+
+  // Prakriti Assessment Mapping
+  let prakritiComposition = [
+    { dosha: "Vata", pct: 33, color: "bg-sky-100 text-sky-700" },
+    { dosha: "Pitta", pct: 33, color: "bg-amber-100 text-amber-700" },
+    { dosha: "Kapha", pct: 34, color: "bg-emerald-100 text-emerald-700" },
+  ];
+  let dominantPrakriti = "Assessing";
+  let prakritiAdvice = "Balance all three doshas with a varied, seasonal diet and moderate routines.";
+  let hasPrakriti = false;
+
+  if (profile?.prakriti) {
+    hasPrakriti = true;
+    const rawP = profile.prakriti.toLowerCase().replace(/_/g, "-");
+    dominantPrakriti = profile.prakriti;
+    if (rawP === "vata-pitta" || rawP === "vata_pitta") {
+      prakritiComposition = [
+        { dosha: "Vata", pct: 45, color: "bg-sky-100 text-sky-700" },
+        { dosha: "Pitta", pct: 40, color: "bg-amber-100 text-amber-700" },
+        { dosha: "Kapha", pct: 15, color: "bg-emerald-100 text-emerald-700" },
+      ];
+      prakritiAdvice = "Dominant: Vata-Pitta. Focus on grounding routines and cooling foods.";
+    } else if (rawP === "vata-kapha" || rawP === "vata_kapha") {
+      prakritiComposition = [
+        { dosha: "Vata", pct: 45, color: "bg-sky-100 text-sky-700" },
+        { dosha: "Pitta", pct: 15, color: "bg-amber-100 text-amber-700" },
+        { dosha: "Kapha", pct: 40, color: "bg-emerald-100 text-emerald-700" },
+      ];
+      prakritiAdvice = "Dominant: Vata-Kapha. Focus on warm, light meals and dynamic exercises.";
+    } else if (rawP === "pitta-kapha" || rawP === "pitta_kapha") {
+      prakritiComposition = [
+        { dosha: "Vata", pct: 15, color: "bg-sky-100 text-sky-700" },
+        { dosha: "Pitta", pct: 45, color: "bg-amber-100 text-amber-700" },
+        { dosha: "Kapha", pct: 40, color: "bg-emerald-100 text-emerald-700" },
+      ];
+      prakritiAdvice = "Dominant: Pitta-Kapha. Focus on refreshing, light meals and calming habits.";
+    } else if (rawP === "vata") {
+      prakritiComposition = [
+        { dosha: "Vata", pct: 70, color: "bg-sky-100 text-sky-700" },
+        { dosha: "Pitta", pct: 15, color: "bg-amber-100 text-amber-700" },
+        { dosha: "Kapha", pct: 15, color: "bg-emerald-100 text-emerald-700" },
+      ];
+      prakritiAdvice = "Dominant: Vata. Focus on nourishing, warm foods and regular schedules.";
+    } else if (rawP === "pitta") {
+      prakritiComposition = [
+        { dosha: "Vata", pct: 15, color: "bg-sky-100 text-sky-700" },
+        { dosha: "Pitta", pct: 70, color: "bg-amber-100 text-amber-700" },
+        { dosha: "Kapha", pct: 15, color: "bg-emerald-100 text-emerald-700" },
+      ];
+      prakritiAdvice = "Dominant: Pitta. Focus on cooling foods, hydration, and mind relaxation.";
+    } else if (rawP === "kapha") {
+      prakritiComposition = [
+        { dosha: "Vata", pct: 15, color: "bg-sky-100 text-sky-700" },
+        { dosha: "Pitta", pct: 15, color: "bg-amber-100 text-amber-700" },
+        { dosha: "Kapha", pct: 70, color: "bg-emerald-100 text-emerald-700" },
+      ];
+      prakritiAdvice = "Dominant: Kapha. Focus on warm, stimulating spices, and active workouts.";
+    }
+  }
 
   const isPractitioner = user?.role === "practitioner";
   const menuItems = isPractitioner ? PRACTITIONER_MENU : PATIENT_MENU;
+
+  // Compute Days Active
+  let daysActive = "—";
+  if (user?.role === "patient" && patientRecords) {
+    const dates = patientRecords.map((r) => new Date(r.date).getTime()).filter(Boolean);
+    const earliestDate = dates.length > 0 ? Math.min(...dates) : new Date("2026-01-01").getTime();
+    daysActive = String(Math.max(1, Math.floor((Date.now() - earliestDate) / 86400000)));
+  }
+
+  const stats = isPractitioner
+    ? [
+        { label: "Patients Seen", value: pracAnalytics ? String(pracAnalytics.totalConsultations) : "0" },
+        { label: "Prescriptions", value: pracPrescriptions ? String(pracPrescriptions.length) : "0" },
+        { label: "Rating", value: pracAnalytics?.avgRating ? `${pracAnalytics.avgRating.toFixed(1)} ★` : "—" },
+      ]
+    : [
+        { label: "Consultations", value: patientRecords ? String(patientRecords.filter(r => r.type === "consultation").length) : "0" },
+        { label: "Prescriptions", value: patientPrescriptions ? String(patientPrescriptions.length) : "0" },
+        { label: "Days Active", value: daysActive },
+      ];
 
   const [editMode, setEditMode] = useState(false);
   const [showSignOut, setShowSignOut] = useState(false);
@@ -126,7 +224,7 @@ export default function ProfilePage() {
           </button>
         </div>
         <div className="relative z-10 grid grid-cols-3 gap-2 mt-6">
-          {(isPractitioner ? PRACTITIONER_STATS : PATIENT_STATS).map((s) => (
+          {stats.map((s) => (
             <div key={s.label} className="bg-white/10 backdrop-blur-sm rounded-xl p-2.5 text-center border border-white/10">
               <p className="font-display text-xl font-bold text-white">{s.value}</p>
               <p className="text-[10px] text-white/60 mt-0.5">{s.label}</p>
@@ -347,9 +445,9 @@ export default function ProfilePage() {
                 <h2 className="font-semibold text-foreground text-sm">Wellness Score</h2>
                 <p className="text-xs text-muted-foreground mt-0.5">Based on Dinacharya adherence</p>
               </div>
-              <span className="font-display text-3xl font-bold text-herb-green">74</span>
+              <span className="font-display text-3xl font-bold text-herb-green">{wellnessScore}</span>
             </div>
-            <Progress value={74} className="h-2 bg-sand" />
+            <Progress value={wellnessScore} className="h-2 bg-sand" />
             <div className="flex justify-between mt-2 text-[10px] text-muted-foreground">
               <span>Needs improvement</span>
               <span>Excellent</span>
@@ -359,14 +457,10 @@ export default function ProfilePage() {
           <div className="bg-ivory-deep rounded-2xl border border-border p-5">
             <div className="flex items-center justify-between mb-3">
               <h2 className="font-semibold text-foreground text-sm">Your Prakriti</h2>
-              <span className="text-xs text-herb-green font-medium">Assessed</span>
+              <span className="text-xs text-herb-green font-medium">{hasPrakriti ? "Assessed" : "Not Assessed"}</span>
             </div>
             <div className="flex gap-2">
-              {[
-                { dosha: "Vata", pct: 40, color: "bg-sky-100 text-sky-700" },
-                { dosha: "Pitta", pct: 38, color: "bg-amber-100 text-amber-700" },
-                { dosha: "Kapha", pct: 22, color: "bg-emerald-100 text-emerald-700" },
-              ].map((d) => (
+              {prakritiComposition.map((d) => (
                 <div key={d.dosha} className={`flex-1 rounded-xl p-2.5 text-center ${d.color}`}>
                   <p className="font-bold text-sm font-display">{d.pct}%</p>
                   <p className="text-[10px] font-medium mt-0.5">{d.dosha}</p>
@@ -374,7 +468,7 @@ export default function ProfilePage() {
               ))}
             </div>
             <p className="text-xs text-muted-foreground mt-2.5">
-              Dominant: Vata-Pitta. Focus on grounding routines and cooling foods.
+              {prakritiAdvice}
             </p>
           </div>
 

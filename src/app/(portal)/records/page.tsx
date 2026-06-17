@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { MOCK_HEALTH_RECORDS } from "@/lib/data";
+import { useHealthRecords, useConsentGrants } from "@/lib/hooks";
 import { ABHABadge } from "@/components/Badges";
 import { cn } from "@/lib/utils";
 import { useAuth } from "@/contexts/auth-context";
@@ -35,7 +35,41 @@ export default function RecordsPage() {
   const [activeTab, setActiveTab] = useState<FilterTab>("All");
   const [expanded, setExpanded] = useState<string | null>(null);
 
-  const filtered = MOCK_HEALTH_RECORDS.filter((r) => {
+  const { data: records } = useHealthRecords(user?.id);
+  const { data: consents } = useConsentGrants(user?.id);
+
+  const consultationsCount = records?.filter((r) => r.type === "consultation").length ?? 0;
+  const prescriptionsCount = records?.filter((r) => r.type === "prescription").length ?? 0;
+  const labReportsCount = records?.filter((r) => r.type === "lab").length ?? 0;
+
+  // Months Active
+  let monthsActive = 0;
+  if (records && records.length > 0) {
+    const dates = records.map((r) => new Date(r.date).getTime()).filter(Boolean);
+    if (dates.length > 0) {
+      const minDate = new Date(Math.min(...dates));
+      const maxDate = new Date();
+      monthsActive = (maxDate.getFullYear() - minDate.getFullYear()) * 12 + maxDate.getMonth() - minDate.getMonth();
+      if (monthsActive <= 0) monthsActive = 1;
+    }
+  }
+
+  // Unique Practitioners
+  const uniquePractitioners = new Set(records?.map((r) => r.doctor).filter(Boolean)).size;
+
+  // Active Consents
+  const activeConsentsCount = consents?.filter((c) => !c.expiresAt || new Date(c.expiresAt) > new Date()).length ?? 0;
+
+  const statsList = [
+    { label: "Consultations", value: String(consultationsCount), icon: "🩺" },
+    { label: "Prescriptions", value: String(prescriptionsCount), icon: "🌿" },
+    { label: "Lab Reports", value: String(labReportsCount), icon: "🔬" },
+    { label: "Months Active", value: String(monthsActive), icon: "📅" },
+    { label: "Practitioners", value: String(uniquePractitioners), icon: "👨‍⚕️" },
+    { label: "Consents Active", value: String(activeConsentsCount), icon: "🔒" },
+  ];
+
+  const filtered = (records ?? []).filter((r) => {
     const f = filterMap[activeTab];
     return !f || r.type === f;
   });
@@ -65,14 +99,7 @@ export default function RecordsPage() {
 
       {/* Stats */}
       <div className="grid grid-cols-3 sm:grid-cols-6 gap-3 mb-6">
-        {[
-          { label: "Consultations", value: "12", icon: "🩺" },
-          { label: "Prescriptions", value: "8", icon: "🌿" },
-          { label: "Lab Reports", value: "5", icon: "🔬" },
-          { label: "Months Active", value: "14", icon: "📅" },
-          { label: "Practitioners", value: "4", icon: "👨‍⚕️" },
-          { label: "Consents Active", value: "3", icon: "🔒" },
-        ].map((s) => (
+        {statsList.map((s) => (
           <div key={s.label} className="bg-white rounded-xl p-3 border border-border text-center">
             <span className="text-xl">{s.icon}</span>
             <p className="font-bold text-herb-green font-display text-lg mt-1">{s.value}</p>

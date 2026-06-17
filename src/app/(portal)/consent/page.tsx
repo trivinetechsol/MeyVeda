@@ -2,66 +2,62 @@
 
 import { useState } from "react";
 import { cn } from "@/lib/utils";
+import { useAuth } from "@/contexts/auth-context";
+import { useConsentGrants } from "@/lib/hooks";
+import { revokeConsent } from "@/lib/queries";
 
 type ConsentTab = "active" | "expired";
 
-const ACTIVE_CONSENTS = [
-  {
-    id: "c1",
-    requester: "Dr. Aditi Shastri",
-    org: "Holistic Wellness Clinic",
-    purpose: "Teleconsultation & Prescription",
-    dataTypes: ["EMR", "Prescriptions", "Vitals"],
-    grantedOn: "05 Jun 2026",
-    expiresIn: "25 days",
-    icon: "🩺",
-  },
-  {
-    id: "c2",
-    requester: "MeyVeda Apothecary",
-    org: "MeyVeda Health",
-    purpose: "Order Processing & Dispensing",
-    dataTypes: ["Prescriptions", "Address"],
-    grantedOn: "05 Jun 2026",
-    expiresIn: "7 days",
-    icon: "🏥",
-  },
-  {
-    id: "c3",
-    requester: "Apollo Hospitals",
-    org: "Apollo Health & Lifestyle",
-    purpose: "Emergency Records Access",
-    dataTypes: ["EMR", "Lab Reports", "Allergies"],
-    grantedOn: "01 Jun 2026",
-    expiresIn: "12 days",
-    icon: "🏨",
-  },
-];
+const CONSENT_ICONS: Record<string, string> = {
+  prescriptions: "🏥",
+  emr: "🩺",
+  vitals: "📈",
+  allergy: "🤧",
+  diagnostic: "🔬",
+};
 
-const EXPIRED_CONSENTS = [
-  {
-    id: "e1",
-    requester: "Dr. Ramesh Iyer",
-    org: "Ayush Naturopathy Centre",
-    purpose: "Naturopathy Consultation",
-    dataTypes: ["Vitals", "Lifestyle Data"],
-    grantedOn: "10 Apr 2026",
-    expiredOn: "10 May 2026",
-    icon: "🌿",
-  },
-];
+const getIconForRecordTypes = (types: string[]) => {
+  const primary = (types[0] || "").toLowerCase();
+  for (const key in CONSENT_ICONS) {
+    if (primary.includes(key)) return CONSENT_ICONS[key];
+  }
+  return "🩺";
+};
 
 export default function ConsentPage() {
+  const { user } = useAuth();
+  const { data: rawConsents, loading, refetch } = useConsentGrants(user?.id);
+  const allConsents = rawConsents ?? [];
+
   const [activeTab, setActiveTab] = useState<ConsentTab>("active");
   const [revoking, setRevoking] = useState<string | null>(null);
-  const [consents, setConsents] = useState(ACTIVE_CONSENTS);
+  const [submitting, setSubmitting] = useState(false);
 
-  function handleRevoke(id: string) {
-    setTimeout(() => {
-      setConsents((prev) => prev.filter((c) => c.id !== id));
+  // Divide consents into active vs expired/revoked
+  const activeConsents = allConsents.filter((c) => {
+    if (c.action === "revoked") return false;
+    if (c.expiresAt && new Date(c.expiresAt) < new Date()) return false;
+    return true;
+  });
+
+  const expiredConsents = allConsents.filter((c) => {
+    return c.action === "revoked" || (c.expiresAt && new Date(c.expiresAt) < new Date());
+  });
+
+  async function handleRevoke(id: string) {
+    setSubmitting(true);
+    try {
+      await revokeConsent(id);
       setRevoking(null);
-    }, 1000);
+      refetch();
+    } catch (err) {
+      console.error("Failed to revoke consent:", err);
+    } finally {
+      setSubmitting(false);
+    }
   }
+
+  const consents = activeTab === "active" ? activeConsents : expiredConsents;
 
   return (
     <div className="px-4 sm:px-6 lg:px-8 py-6 max-w-7xl mx-auto">
@@ -99,90 +95,77 @@ export default function ConsentPage() {
                     : "border-border text-muted-foreground bg-white hover:border-herb-green/30"
                 )}
               >
-                {tab} ({tab === "active" ? consents.length : EXPIRED_CONSENTS.length})
+                {tab} ({tab === "active" ? activeConsents.length : expiredConsents.length})
               </button>
             ))}
           </div>
 
-          {activeTab === "active" && (
+          {loading ? (
+            <div className="py-20 text-center text-sm text-muted-foreground">Loading consents...</div>
+          ) : (
             <div className="space-y-3">
               {consents.length === 0 && (
-                <div className="text-center py-12">
+                <div className="text-center py-12 bg-white rounded-2xl border border-border">
                   <span className="text-4xl">🔒</span>
-                  <p className="text-sm font-medium text-foreground mt-3">No active consents</p>
-                  <p className="text-xs text-muted-foreground mt-1">All consents have been revoked</p>
+                  <p className="text-sm font-medium text-foreground mt-3">
+                    {activeTab === "active" ? "No active consents" : "No expired or revoked consents"}
+                  </p>
+                  <p className="text-xs text-muted-foreground mt-1">
+                    {activeTab === "active" ? "All active data sharing requests will appear here" : "Previously completed sharing sessions will be shown here"}
+                  </p>
                 </div>
               )}
-              {consents.map((c) => (
-                <div key={c.id} className="bg-white rounded-2xl border border-border p-5">
-                  <div className="flex items-start gap-4">
-                    <div className="w-10 h-10 rounded-xl bg-herb-green/10 flex items-center justify-center flex-shrink-0">
-                      <span className="text-xl">{c.icon}</span>
-                    </div>
-                    <div className="flex-1 min-w-0">
-                      <div className="flex items-start justify-between gap-2">
-                        <div>
-                          <p className="text-sm font-semibold text-foreground">{c.requester}</p>
-                          <p className="text-xs text-muted-foreground">{c.org}</p>
+              {consents.map((c) => {
+                const isRevoked = c.action === "revoked";
+                const isExpired = c.expiresAt && new Date(c.expiresAt) < new Date();
+                
+                return (
+                  <div key={c.id} className={cn("bg-white rounded-2xl border border-border p-5 transition-all", (isRevoked || isExpired) ? "opacity-60" : "")}>
+                    <div className="flex items-start gap-4">
+                      <div className="w-10 h-10 rounded-xl bg-herb-green/10 flex items-center justify-center flex-shrink-0">
+                        <span className="text-xl">{getIconForRecordTypes(c.recordTypes)}</span>
+                      </div>
+                      <div className="flex-1 min-w-0">
+                        <div className="flex items-start justify-between gap-2">
+                          <div>
+                            <p className="text-sm font-semibold text-foreground">{c.practitionerName}</p>
+                            <p className="text-xs text-muted-foreground">Purpose: {c.duration}</p>
+                          </div>
+                          <span className={cn("flex-shrink-0 text-[10px] font-semibold px-2 py-0.5 rounded-full",
+                            isRevoked ? "bg-red-50 text-red-600" : isExpired ? "bg-muted text-muted-foreground" : "bg-herb-green/10 text-herb-green"
+                          )}>
+                            {isRevoked ? "Revoked" : isExpired ? "Expired" : "Active"}
+                          </span>
                         </div>
-                        <span className="flex-shrink-0 text-[10px] bg-herb-green/10 text-herb-green font-semibold px-2 py-0.5 rounded-full">
-                          Active
-                        </span>
-                      </div>
-                      <p className="text-xs text-foreground mt-2 font-medium">{c.purpose}</p>
-                      <div className="flex flex-wrap gap-1.5 mt-2">
-                        {c.dataTypes.map((d) => (
-                          <span key={d} className="text-[10px] bg-muted px-2 py-0.5 rounded-full text-muted-foreground">
-                            {d}
-                          </span>
-                        ))}
-                      </div>
-                      <div className="flex items-center justify-between mt-3">
-                        <p className="text-[10px] text-muted-foreground">
-                          Granted: {c.grantedOn} · Expires in{" "}
-                          <span className={cn("font-semibold", parseInt(c.expiresIn) <= 7 ? "text-amber-600" : "text-herb-green")}>
-                            {c.expiresIn}
-                          </span>
-                        </p>
-                        <button
-                          onClick={() => setRevoking(c.id)}
-                          className="text-[10px] text-red-600 font-semibold border border-red-200 px-2.5 py-1 rounded-lg hover:bg-red-50 transition-colors"
-                        >
-                          Revoke
-                        </button>
+                        <p className="text-xs text-foreground mt-2 font-medium">Data sharing granted for EMR synchronization</p>
+                        <div className="flex flex-wrap gap-1.5 mt-2">
+                          {(c.recordTypes || []).map((d) => (
+                            <span key={d} className="text-[10px] bg-muted px-2 py-0.5 rounded-full text-muted-foreground capitalize">
+                              {d}
+                            </span>
+                          ))}
+                        </div>
+                        <div className="flex items-center justify-between mt-3">
+                          <p className="text-[10px] text-muted-foreground">
+                            Granted: {c.createdAt}
+                            {c.expiresAt && !isRevoked && !isExpired && (
+                              <> · Expires: {new Date(c.expiresAt).toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" })}</>
+                            )}
+                          </p>
+                          {activeTab === "active" && !isRevoked && !isExpired && (
+                            <button
+                              onClick={() => setRevoking(c.id)}
+                              className="text-[10px] text-red-600 font-semibold border border-red-200 px-2.5 py-1 rounded-lg hover:bg-red-50 transition-colors"
+                            >
+                              Revoke
+                            </button>
+                          )}
+                        </div>
                       </div>
                     </div>
                   </div>
-                </div>
-              ))}
-            </div>
-          )}
-
-          {activeTab === "expired" && (
-            <div className="space-y-3">
-              {EXPIRED_CONSENTS.map((c) => (
-                <div key={c.id} className="bg-white rounded-2xl border border-border p-5 opacity-60">
-                  <div className="flex items-start gap-4">
-                    <div className="w-10 h-10 rounded-xl bg-muted flex items-center justify-center flex-shrink-0">
-                      <span className="text-xl">{c.icon}</span>
-                    </div>
-                    <div className="flex-1">
-                      <div className="flex items-start justify-between gap-2">
-                        <div>
-                          <p className="text-sm font-semibold text-foreground">{c.requester}</p>
-                          <p className="text-xs text-muted-foreground">{c.org}</p>
-                        </div>
-                        <span className="text-[10px] bg-muted text-muted-foreground font-semibold px-2 py-0.5 rounded-full">
-                          Expired
-                        </span>
-                      </div>
-                      <p className="text-xs text-muted-foreground mt-1">
-                        Expired: {c.expiredOn}
-                      </p>
-                    </div>
-                  </div>
-                </div>
-              ))}
+                );
+              })}
             </div>
           )}
         </div>
@@ -192,9 +175,9 @@ export default function ConsentPage() {
           <div className="bg-white rounded-2xl border border-border p-5">
             <h3 className="font-semibold text-foreground text-sm mb-3">Consent Summary</h3>
             {[
-              { label: "Active Consents", value: consents.length, color: "text-herb-green" },
-              { label: "Expired", value: EXPIRED_CONSENTS.length, color: "text-muted-foreground" },
-              { label: "Revoked (all time)", value: 2, color: "text-red-500" },
+              { label: "Active Consents", value: activeConsents.length, color: "text-herb-green" },
+              { label: "Expired", value: expiredConsents.filter(c => c.action !== "revoked").length, color: "text-muted-foreground" },
+              { label: "Revoked (all time)", value: expiredConsents.filter(c => c.action === "revoked").length, color: "text-red-500" },
             ].map((s) => (
               <div key={s.label} className="flex items-center justify-between py-2 border-b border-border last:border-0">
                 <p className="text-xs text-muted-foreground">{s.label}</p>
@@ -235,16 +218,18 @@ export default function ConsentPage() {
             </p>
             <div className="flex gap-3 mt-5">
               <button
+                disabled={submitting}
                 onClick={() => setRevoking(null)}
-                className="flex-1 py-3 rounded-xl border border-border text-sm font-medium text-foreground hover:bg-muted transition-colors"
+                className="flex-1 py-3 rounded-xl border border-border text-sm font-medium text-foreground hover:bg-muted transition-colors disabled:opacity-50"
               >
                 Cancel
               </button>
               <button
+                disabled={submitting}
                 onClick={() => handleRevoke(revoking)}
-                className="flex-1 py-3 rounded-xl bg-red-500 text-white text-sm font-semibold hover:bg-red-600 transition-colors"
+                className="flex-1 py-3 rounded-xl bg-red-500 text-white text-sm font-semibold hover:bg-red-600 transition-colors disabled:opacity-50"
               >
-                Revoke
+                {submitting ? "Revoking..." : "Revoke"}
               </button>
             </div>
           </div>

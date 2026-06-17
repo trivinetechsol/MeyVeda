@@ -2,6 +2,8 @@
 
 import { useState } from "react";
 import { cn } from "@/lib/utils";
+import { useAdminMedicines } from "@/lib/hooks";
+import { createMedicine, updateMedicine, toggleMedicineActive } from "@/lib/queries";
 
 type MedStatus = "active" | "inactive" | "low_stock";
 type Category = "Churna" | "Capsule" | "Tablet" | "Ghrita" | "Syrup" | "Oil" | "Juice" | "Cream" | "Drop";
@@ -11,17 +13,6 @@ type Medicine = {
   description: string; price: number; stock: number; unit: string;
   discipline: string; status: MedStatus; sku: string; added: string;
 };
-
-const INITIAL: Medicine[] = [
-  { id: "m1", name: "Ashwagandha Churna", brand: "Kottakkal Arya Vaidya Sala", category: "Churna", description: "Adaptogenic root for stress, immunity and vitality", price: 285, stock: 450, unit: "100g", discipline: "Ayurveda", status: "active", sku: "MVA-CHU-001", added: "10 Jan 2026" },
-  { id: "m2", name: "Triphala Churna", brand: "Himalaya Wellness", category: "Churna", description: "Tri-fruit blend for digestion and detoxification", price: 145, stock: 320, unit: "100g", discipline: "Ayurveda", status: "active", sku: "MVA-CHU-002", added: "10 Jan 2026" },
-  { id: "m3", name: "Brahmi Ghrita", brand: "Nagarjuna Herbal", category: "Ghrita", description: "Medicated ghee for cognitive function and memory", price: 410, stock: 18, unit: "150g", discipline: "Ayurveda", status: "low_stock", sku: "MVA-GHR-001", added: "15 Jan 2026" },
-  { id: "m4", name: "Chyawanprash", brand: "Dabur", category: "Syrup", description: "Classic immunity tonic with Amla and 40+ herbs", price: 299, stock: 210, unit: "500g", discipline: "Ayurveda", status: "active", sku: "MVA-SYP-001", added: "20 Jan 2026" },
-  { id: "m5", name: "Neem Capsules", brand: "Organic India", category: "Capsule", description: "Blood purifier and skin health support", price: 245, stock: 180, unit: "60 caps", discipline: "Ayurveda", status: "active", sku: "MVA-CAP-001", added: "01 Feb 2026" },
-  { id: "m6", name: "Giloy Juice", brand: "Patanjali", category: "Juice", description: "Immune modulator and fever management", price: 159, stock: 90, unit: "500ml", discipline: "Ayurveda", status: "active", sku: "MVA-JUI-001", added: "05 Feb 2026" },
-  { id: "m7", name: "Brahmi Oil", brand: "Bajaj Keo Karpin", category: "Oil", description: "Scalp nourishment and mental calm", price: 175, stock: 12, unit: "200ml", discipline: "Ayurveda", status: "low_stock", sku: "MVA-OIL-001", added: "10 Feb 2026" },
-  { id: "m8", name: "Tulsi Drops", brand: "Himalaya", category: "Drop", description: "Respiratory support and immunity", price: 120, stock: 0, unit: "30ml", discipline: "Ayurveda", status: "inactive", sku: "MVA-DRP-001", added: "15 Feb 2026" },
-];
 
 const CATEGORIES: Category[] = ["Churna", "Capsule", "Tablet", "Ghrita", "Syrup", "Oil", "Juice", "Cream", "Drop"];
 const DISCIPLINES = ["Ayurveda", "Homeopathy", "Unani", "Siddha", "Naturopathy"];
@@ -35,19 +26,42 @@ const STATUS_STYLE: Record<MedStatus, string> = {
 const STATUS_LABEL: Record<MedStatus, string> = {
   active: "Active",
   low_stock: "Low Stock",
-  inactive: "Out of Stock",
+  inactive: "Inactive",
 };
 
-const EMPTY_FORM = { name: "", brand: "", category: "Churna" as Category, description: "", price: "", stock: "", unit: "", discipline: "Ayurveda", sku: "" };
+const EMPTY_FORM = { name: "", brand: "", category: "Churna" as Category, description: "", price: "100", stock: "100", unit: "", discipline: "Ayurveda", sku: "" };
 
 export default function AdminMedicinesPage() {
-  const [medicines, setMedicines] = useState<Medicine[]>(INITIAL);
+  const { data: rawMedicines, loading, refetch } = useAdminMedicines();
   const [search, setSearch] = useState("");
   const [filterCat, setFilterCat] = useState("all");
   const [showForm, setShowForm] = useState(false);
   const [editItem, setEditItem] = useState<Medicine | null>(null);
   const [form, setForm] = useState(EMPTY_FORM);
   const [saving, setSaving] = useState(false);
+
+  if (loading) {
+    return (
+      <div className="flex items-center justify-center min-h-[60vh]">
+        <div className="w-8 h-8 border-4 border-herb-green border-t-transparent rounded-full animate-spin"></div>
+      </div>
+    );
+  }
+
+  const medicines: Medicine[] = (rawMedicines ?? []).map((m) => ({
+    id: m.id,
+    name: m.name,
+    brand: m.genericName || "Standard",
+    category: (m.category as Category) || "Churna",
+    description: m.genericName ? `Generic: ${m.genericName}. Standard Dose: ${m.standardDose || "As directed"}` : `Standard Dose: ${m.standardDose || "As directed"}`,
+    price: 100,
+    stock: 100,
+    unit: m.standardDose || "1 unit",
+    discipline: m.discipline,
+    status: m.isActive ? "active" : "inactive",
+    sku: `MVA-${m.id.substring(0, 4).toUpperCase()}`,
+    added: "Live DB",
+  }));
 
   const filtered = medicines.filter((m) => {
     const matchSearch = m.name.toLowerCase().includes(search.toLowerCase()) ||
@@ -58,39 +72,61 @@ export default function AdminMedicinesPage() {
   });
 
   function openAdd() { setForm(EMPTY_FORM); setEditItem(null); setShowForm(true); }
+  
   function openEdit(m: Medicine) {
-    setForm({ name: m.name, brand: m.brand, category: m.category, description: m.description, price: String(m.price), stock: String(m.stock), unit: m.unit, discipline: m.discipline, sku: m.sku });
+    const rawMed = rawMedicines?.find((r) => r.id === m.id);
+    setForm({
+      name: m.name,
+      brand: rawMed?.genericName || "",
+      category: m.category,
+      description: m.description,
+      price: String(m.price),
+      stock: String(m.stock),
+      unit: rawMed?.standardDose || "",
+      discipline: m.discipline,
+      sku: m.sku
+    });
     setEditItem(m);
     setShowForm(true);
   }
 
-  function handleSave(e: React.FormEvent) {
+  async function handleSave(e: React.FormEvent) {
     e.preventDefault();
     setSaving(true);
-    setTimeout(() => {
-      const stockNum = Number(form.stock);
-      const computedStatus: MedStatus = stockNum === 0 ? "inactive" : stockNum < 20 ? "low_stock" : "active";
+    try {
       if (editItem) {
-        setMedicines((prev) => prev.map((m) => m.id === editItem.id
-          ? { ...m, ...form, price: Number(form.price), stock: stockNum, status: computedStatus }
-          : m
-        ));
+        await updateMedicine(editItem.id, {
+          name: form.name,
+          genericName: form.brand,
+          discipline: form.discipline,
+          category: form.category,
+          standardDose: form.unit,
+        });
       } else {
-        setMedicines((prev) => [{
-          id: `m${Date.now()}`, ...form,
-          price: Number(form.price), stock: stockNum, status: computedStatus,
-          added: new Date().toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" }),
-        }, ...prev]);
+        await createMedicine({
+          name: form.name,
+          genericName: form.brand,
+          discipline: form.discipline,
+          category: form.category,
+          standardDose: form.unit,
+        });
       }
       setShowForm(false);
+      refetch();
+    } catch (err: any) {
+      alert(err.message ?? "Failed to save medicine");
+    } finally {
       setSaving(false);
-    }, 800);
+    }
   }
 
-  function toggleActive(id: string) {
-    setMedicines((prev) => prev.map((m) =>
-      m.id === id ? { ...m, status: m.status === "active" ? "inactive" : "active" } : m
-    ));
+  async function toggleActive(id: string, currentStatus: string) {
+    try {
+      await toggleMedicineActive(id, currentStatus !== "active");
+      refetch();
+    } catch (err: any) {
+      alert(err.message ?? "Failed to toggle status");
+    }
   }
 
   return (
@@ -153,7 +189,7 @@ export default function AdminMedicinesPage() {
                   <td className="px-5 py-3.5 text-right">
                     <div className="flex items-center justify-end gap-3">
                       <button onClick={() => openEdit(m)} className="text-[10px] font-semibold text-herb-green hover:underline">Edit</button>
-                      <button onClick={() => toggleActive(m.id)} className={cn("text-[10px] font-semibold hover:underline", m.status === "active" ? "text-red-500" : "text-amber-600")}>
+                      <button onClick={() => toggleActive(m.id, m.status)} className={cn("text-[10px] font-semibold hover:underline", m.status === "active" ? "text-red-500" : "text-amber-600")}>
                         {m.status === "active" ? "Disable" : "Enable"}
                       </button>
                     </div>
@@ -184,8 +220,8 @@ export default function AdminMedicinesPage() {
                   <input required value={form.name} onChange={e => setForm(f => ({ ...f, name: e.target.value }))} placeholder="e.g. Ashwagandha Churna" className="w-full px-3 py-2 text-sm border border-border rounded-xl focus:outline-none focus:ring-2 focus:ring-herb-green/20" />
                 </div>
                 <div className="col-span-2">
-                  <label className="text-xs font-semibold text-foreground block mb-1">Brand</label>
-                  <input required value={form.brand} onChange={e => setForm(f => ({ ...f, brand: e.target.value }))} placeholder="Brand name" className="w-full px-3 py-2 text-sm border border-border rounded-xl focus:outline-none focus:ring-2 focus:ring-herb-green/20" />
+                  <label className="text-xs font-semibold text-foreground block mb-1">Generic Name / Brand</label>
+                  <input required value={form.brand} onChange={e => setForm(f => ({ ...f, brand: e.target.value }))} placeholder="e.g. Withania somnifera" className="w-full px-3 py-2 text-sm border border-border rounded-xl focus:outline-none focus:ring-2 focus:ring-herb-green/20" />
                 </div>
                 <div>
                   <label className="text-xs font-semibold text-foreground block mb-1">Category</label>
@@ -200,24 +236,8 @@ export default function AdminMedicinesPage() {
                   </select>
                 </div>
                 <div>
-                  <label className="text-xs font-semibold text-foreground block mb-1">Price (₹)</label>
-                  <input required type="number" value={form.price} onChange={e => setForm(f => ({ ...f, price: e.target.value }))} placeholder="0" className="w-full px-3 py-2 text-sm border border-border rounded-xl focus:outline-none focus:ring-2 focus:ring-herb-green/20" />
-                </div>
-                <div>
-                  <label className="text-xs font-semibold text-foreground block mb-1">Stock (units)</label>
-                  <input required type="number" value={form.stock} onChange={e => setForm(f => ({ ...f, stock: e.target.value }))} placeholder="0" className="w-full px-3 py-2 text-sm border border-border rounded-xl focus:outline-none focus:ring-2 focus:ring-herb-green/20" />
-                </div>
-                <div>
-                  <label className="text-xs font-semibold text-foreground block mb-1">Unit</label>
-                  <input required value={form.unit} onChange={e => setForm(f => ({ ...f, unit: e.target.value }))} placeholder="e.g. 100g, 60 caps" className="w-full px-3 py-2 text-sm border border-border rounded-xl focus:outline-none focus:ring-2 focus:ring-herb-green/20" />
-                </div>
-                <div>
-                  <label className="text-xs font-semibold text-foreground block mb-1">SKU</label>
-                  <input required value={form.sku} onChange={e => setForm(f => ({ ...f, sku: e.target.value }))} placeholder="MVA-CAT-XXX" className="w-full px-3 py-2 text-sm border border-border rounded-xl focus:outline-none focus:ring-2 focus:ring-herb-green/20" />
-                </div>
-                <div className="col-span-2">
-                  <label className="text-xs font-semibold text-foreground block mb-1">Description</label>
-                  <textarea rows={2} value={form.description} onChange={e => setForm(f => ({ ...f, description: e.target.value }))} placeholder="Short description" className="w-full px-3 py-2 text-sm border border-border rounded-xl focus:outline-none focus:ring-2 focus:ring-herb-green/20 resize-none" />
+                  <label className="text-xs font-semibold text-foreground block mb-1">Standard Dose / Unit</label>
+                  <input required value={form.unit} onChange={e => setForm(f => ({ ...f, unit: e.target.value }))} placeholder="e.g. 5g, 1 capsule" className="w-full px-3 py-2 text-sm border border-border rounded-xl focus:outline-none focus:ring-2 focus:ring-herb-green/20" />
                 </div>
               </div>
               <div className="flex gap-3 pt-2">
