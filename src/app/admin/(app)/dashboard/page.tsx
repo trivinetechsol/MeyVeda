@@ -7,7 +7,7 @@ import {
   useAdminPatients,
   useAdminClinics,
   useAdminMedicines,
-} from "@/lib/hooks";
+} from "@/hooks/use-admin";
 
 const STATUS_STYLE: Record<string, string> = {
   verified: "bg-herb-green/10 text-herb-green",

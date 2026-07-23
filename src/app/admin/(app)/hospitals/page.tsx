@@ -2,8 +2,7 @@
 
 import { useState } from "react";
 import { cn } from "@/lib/utils";
-import { useAdminClinics } from "@/lib/hooks";
-import { createClinic, toggleClinicActive } from "@/lib/queries";
+import { useAdminClinics, createClinicApi as createClinic, toggleClinicActiveApi as toggleClinicActive } from "@/hooks/use-admin";
 
 type HospitalStatus = "active" | "inactive" | "pending";
 type HospitalType = "AYUSH Hospital" | "Wellness Centre" | "Panchakarma Centre" | "Homeopathy Clinic" | "Naturopathy Centre" | "Multi-specialty AYUSH";

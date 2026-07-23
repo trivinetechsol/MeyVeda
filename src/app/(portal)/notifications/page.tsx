@@ -4,9 +4,9 @@ import Link from "next/link";
 import { useState } from "react";
 import { cn } from "@/lib/utils";
 import { useAuth } from "@/contexts/auth-context";
-import { useNotifications } from "@/lib/hooks";
-import { markNotificationRead, markAllNotificationsRead } from "@/lib/queries";
-import type { NotificationRow } from "@/lib/queries";
+import { usePatientUpcomingCalls } from "@/hooks/use-consultations";
+import { useAppointments } from "@/hooks/use-appointments";
+import { useNotifications, markNotificationReadApi, markAllNotificationsReadApi, type NotificationRow } from "@/hooks/use-notification";
 
 const TYPE_ICON: Record<string, string> = {
   appointment: "🗓️",
@@ -21,20 +21,80 @@ const TYPE_ICON: Record<string, string> = {
 export default function NotificationsPage() {
   const { user } = useAuth();
   const { data: notifications, loading, refetch } = useNotifications(user?.id);
-  const [filter, setFilter] = useState<"all" | "unread">("all");
+  const { data: upcomingCalls } = usePatientUpcomingCalls(user?.id);
+  const { data: appointments } = useAppointments(user?.id);
+  const [filter, setFilter] = useState<"all" | "unread" | "upcoming" | "expired">("all");
 
-  const allNotifs = notifications ?? [];
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+
+  const getStartOfDay = (dateStr: string) => {
+    const d = new Date(dateStr);
+    if (isNaN(d.getTime())) return null;
+    d.setHours(0, 0, 0, 0);
+    return d;
+  };
+
+  const injectedCalls = (upcomingCalls || []).map((call) => ({
+    id: `upcoming-${call.id}`,
+    type: "appointment",
+    title: "Upcoming Session Fixed",
+    body: `Your upcoming appointment is with ${user?.role === 'patient' ? call.practitionerName : call.patientName} on ${call.date} at ${call.time}`,
+    isRead: true,
+    createdAt: call.createdAt,
+    rawDate: call.date,
+    timeAgo: "Upcoming",
+    deepLink: "/prescription"
+  })) as any[];
+
+  const injectedAppointments = (appointments || [])
+    .map((appt) => ({
+      id: `appt-${appt.id}`,
+      type: "appointment",
+      title: "Appointment Fixed",
+      body: `Your appointment is with ${appt.doctor} on ${appt.date}`,
+      isRead: true,
+      createdAt: new Date().toISOString(),
+      rawDate: appt.dateRaw,
+      timeAgo: "Appointment",
+      deepLink: "/appointments"
+    })) as any[];
+
+  const baseNotifs = (notifications ?? []).map((n) => ({ ...n, rawDate: n.createdAt }));
+
+  const allNotifs = [...injectedCalls, ...injectedAppointments, ...baseNotifs];
   const unreadCount = allNotifs.filter((n) => !n.isRead).length;
-  const filtered = filter === "unread" ? allNotifs.filter((n) => !n.isRead) : allNotifs;
+
+  const filtered = allNotifs.filter((n) => {
+    if (filter === "all") return true;
+    if (filter === "unread") return !n.isRead;
+
+    const notifDate = getStartOfDay(n.rawDate || n.createdAt);
+    if (!notifDate) return false;
+
+    if (filter === "upcoming") {
+      return notifDate.getTime() >= today.getTime();
+    }
+    if (filter === "expired") {
+      return notifDate.getTime() < today.getTime();
+    }
+    return true;
+  });
+
+  filtered.sort((a, b) => {
+    const dateA = new Date(a.rawDate || a.createdAt).getTime();
+    const dateB = new Date(b.rawDate || b.createdAt).getTime();
+    return dateB - dateA;
+  });
 
   async function handleMarkRead(id: string) {
-    await markNotificationRead(id);
+    await markNotificationReadApi(id);
     refetch();
   }
 
   async function handleMarkAllRead() {
     if (user?.id) {
-      await markAllNotificationsRead(user.id);
+      await markAllNotificationsReadApi();
       refetch();
     }
   }
@@ -59,13 +119,13 @@ export default function NotificationsPage() {
       </div>
 
       {/* Filter tabs */}
-      <div className="flex gap-1 bg-muted rounded-xl p-1 mb-6 w-fit">
-        {(["all", "unread"] as const).map((f) => (
+      <div className="flex gap-1 bg-muted rounded-xl p-1 mb-6 flex-wrap w-full sm:w-fit">
+        {(["all", "unread", "upcoming", "expired"] as const).map((f) => (
           <button
             key={f}
             onClick={() => setFilter(f)}
             className={cn(
-              "px-5 py-2 text-sm font-medium rounded-lg capitalize transition-all",
+              "px-4 py-2 text-sm font-medium rounded-lg capitalize transition-all whitespace-nowrap flex-1 sm:flex-none",
               filter === f ? "bg-white text-foreground shadow-sm" : "text-muted-foreground hover:text-foreground"
             )}
           >
@@ -97,43 +157,75 @@ export default function NotificationsPage() {
           <span className="text-4xl">🔔</span>
           <p className="font-semibold text-foreground mt-3">No notifications</p>
           <p className="text-xs text-muted-foreground mt-1">
-            {filter === "unread" ? "No unread notifications" : "You're all caught up!"}
+            {filter === "unread" ? "No unread notifications" : "Nothing to show in this tab."}
           </p>
         </div>
       )}
 
       {/* Notification list */}
       {!loading && filtered.length > 0 && (
-        <div className="space-y-2">
+        <div className="space-y-4">
           {filtered.map((notif: NotificationRow) => (
             <button
               key={notif.id}
               onClick={() => !notif.isRead && handleMarkRead(notif.id)}
               className={cn(
-                "w-full text-left bg-white rounded-2xl border p-4 transition-all hover:shadow-sm",
-                notif.isRead ? "border-border opacity-70" : "border-herb-green/20 bg-herb-green/2"
+                "group w-full text-left bg-white rounded-2xl border transition-all duration-300 relative overflow-hidden",
+                notif.isRead
+                  ? "border-border/60 shadow-sm hover:shadow-md hover:border-border"
+                  : "border-herb-green/30 shadow-[0_4px_20px_-4px_rgba(27,107,74,0.12)] bg-gradient-to-br from-white to-herb-green/[0.03] hover:shadow-[0_8px_30px_-4px_rgba(27,107,74,0.18)] hover:-translate-y-0.5"
               )}
             >
-              <div className="flex items-start gap-3">
-                <span className="text-lg flex-shrink-0 mt-0.5">
-                  {TYPE_ICON[notif.type] ?? TYPE_ICON.general}
-                </span>
-                <div className="flex-1 min-w-0">
-                  <div className="flex items-center justify-between gap-2">
-                    <p className={cn("text-sm font-semibold truncate", notif.isRead ? "text-muted-foreground" : "text-foreground")}>
+              <div className="p-5 flex items-start gap-4">
+                {/* Icon wrapper */}
+                <div className={cn(
+                  "w-12 h-12 rounded-2xl flex items-center justify-center flex-shrink-0 transition-transform duration-300 group-hover:scale-110",
+                  notif.isRead ? "bg-muted" : "bg-herb-green/10"
+                )}>
+                  <span className="text-xl">{TYPE_ICON[notif.type] ?? TYPE_ICON.general}</span>
+                </div>
+
+                {/* Content */}
+                <div className="flex-1 min-w-0 pt-0.5">
+                  <div className="flex items-center justify-between gap-3">
+                    <p className={cn(
+                      "text-[15px] font-bold truncate transition-colors duration-200",
+                      notif.isRead ? "text-muted-foreground group-hover:text-foreground/80" : "text-foreground group-hover:text-herb-green"
+                    )}>
                       {notif.title}
                     </p>
-                    <span className="text-[10px] text-muted-foreground flex-shrink-0">{notif.timeAgo}</span>
+                    <span className={cn(
+                      "text-[11px] font-semibold flex-shrink-0 px-2 py-0.5 rounded-full border tracking-wide uppercase",
+                      notif.isRead ? "text-muted-foreground border-border bg-muted/50" : "text-herb-green border-herb-green/20 bg-herb-green/5"
+                    )}>
+                      {notif.timeAgo}
+                    </span>
                   </div>
-                  <p className="text-xs text-muted-foreground mt-0.5 line-clamp-2">{notif.body}</p>
+
+                  <p className={cn(
+                    "text-sm mt-1.5 leading-relaxed line-clamp-2",
+                    notif.isRead ? "text-muted-foreground/80" : "text-muted-foreground"
+                  )}>
+                    {notif.body}
+                  </p>
+
                   {notif.deepLink && (
-                    <Link href={notif.deepLink} className="text-[10px] text-herb-green font-medium mt-1 inline-block hover:underline">
-                      View details →
-                    </Link>
+                    <div className="mt-3 flex items-center">
+                      <Link href={notif.deepLink} className={cn(
+                        "text-[12px] font-bold inline-flex items-center gap-1 transition-all duration-200",
+                        notif.isRead ? "text-muted-foreground hover:text-foreground" : "text-herb-green hover:text-herb-green/80 group-hover:translate-x-1"
+                      )}>
+                        View details <span className="text-[14px]">→</span>
+                      </Link>
+                    </div>
                   )}
                 </div>
+
+                {/* Unread indicator */}
                 {!notif.isRead && (
-                  <div className="w-2 h-2 rounded-full bg-herb-green flex-shrink-0 mt-2" />
+                  <div className="absolute top-[26px] right-4 flex-shrink-0">
+                    <div className="w-2 h-2 rounded-full bg-herb-green shadow-[0_0_8px_rgba(27,107,74,0.6)] animate-pulse" />
+                  </div>
                 )}
               </div>
             </button>

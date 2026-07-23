@@ -1,9 +1,8 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { cn } from "@/lib/utils";
-import { useAdminMedicines } from "@/lib/hooks";
-import { createMedicine, updateMedicine, toggleMedicineActive } from "@/lib/queries";
+import type { MedicineRow } from "./type";
 
 type MedStatus = "active" | "inactive" | "low_stock";
 type Category = "Churna" | "Capsule" | "Tablet" | "Ghrita" | "Syrup" | "Oil" | "Juice" | "Cream" | "Drop";
@@ -31,8 +30,74 @@ const STATUS_LABEL: Record<MedStatus, string> = {
 
 const EMPTY_FORM = { name: "", brand: "", category: "Churna" as Category, description: "", price: "100", stock: "100", unit: "", discipline: "Ayurveda", sku: "" };
 
+async function fetchAdminMedicines(): Promise<MedicineRow[]> {
+  const response = await fetch("/api/medicines/admin", { method: "GET", credentials: "include", cache: "no-store" });
+  const result = await response.json();
+  if (!response.ok || !result.success) {
+    throw new Error(result.error || "Unable to load medicines");
+  }
+  return result.data as MedicineRow[];
+}
+
+async function createMedicine(m: { name: string; generic_name?: string; brand?: string; discipline: string; category: string; standard_dose?: string; price_paise?: number }): Promise<void> {
+  const response = await fetch("/api/medicines/admin", {
+    method: "POST",
+    credentials: "include",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(m),
+  });
+  const result = await response.json();
+  if (!response.ok || !result.success) {
+    throw new Error(result.error || "Unable to create medicine");
+  }
+}
+
+async function updateMedicine(id: string, m: { name: string; generic_name?: string; brand?: string; discipline: string; category: string; standard_dose?: string; price_paise?: number }): Promise<void> {
+  const response = await fetch(`/api/medicines/admin/${id}`, {
+    method: "PATCH",
+    credentials: "include",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(m),
+  });
+  const result = await response.json();
+  if (!response.ok || !result.success) {
+    throw new Error(result.error || "Unable to update medicine");
+  }
+}
+
+async function toggleMedicineActive(id: string, isActive: boolean): Promise<void> {
+  const response = await fetch(`/api/medicines/admin/${id}`, {
+    method: "PATCH",
+    credentials: "include",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ action: "toggleActive", isActive }),
+  });
+  const result = await response.json();
+  if (!response.ok || !result.success) {
+    throw new Error(result.error || "Unable to toggle medicine status");
+  }
+}
+
 export default function AdminMedicinesPage() {
-  const { data: rawMedicines, loading, refetch } = useAdminMedicines();
+  const [rawMedicines, setRawMedicines] = useState<MedicineRow[]>([]);
+  const [loading, setLoading] = useState(true);
+
+  async function refetch(): Promise<void> {
+    try {
+      setLoading(true);
+      const data = await fetchAdminMedicines();
+      setRawMedicines(data);
+    } catch (err) {
+      console.error("Failed to load medicines:", err);
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  useEffect(() => {
+    void refetch();
+  }, []);
+
   const [search, setSearch] = useState("");
   const [filterCat, setFilterCat] = useState("all");
   const [showForm, setShowForm] = useState(false);
@@ -51,14 +116,14 @@ export default function AdminMedicinesPage() {
   const medicines: Medicine[] = (rawMedicines ?? []).map((m) => ({
     id: m.id,
     name: m.name,
-    brand: m.genericName || "Standard",
+    brand: m.generic_name || "Standard",
     category: (m.category as Category) || "Churna",
-    description: m.genericName ? `Generic: ${m.genericName}. Standard Dose: ${m.standardDose || "As directed"}` : `Standard Dose: ${m.standardDose || "As directed"}`,
+    description: m.generic_name ? `Generic: ${m.generic_name}. Standard Dose: ${m.standard_dose || "As directed"}` : `Standard Dose: ${m.standard_dose || "As directed"}`,
     price: 100,
     stock: 100,
-    unit: m.standardDose || "1 unit",
+    unit: m.standard_dose || "1 unit",
     discipline: m.discipline,
-    status: m.isActive ? "active" : "inactive",
+    status: m.is_active ? "active" : "inactive",
     sku: `MVA-${m.id.substring(0, 4).toUpperCase()}`,
     added: "Live DB",
   }));
@@ -77,12 +142,12 @@ export default function AdminMedicinesPage() {
     const rawMed = rawMedicines?.find((r) => r.id === m.id);
     setForm({
       name: m.name,
-      brand: rawMed?.genericName || "",
+      brand: rawMed?.generic_name || "",
       category: m.category,
       description: m.description,
       price: String(m.price),
       stock: String(m.stock),
-      unit: rawMed?.standardDose || "",
+      unit: rawMed?.standard_dose || "",
       discipline: m.discipline,
       sku: m.sku
     });
@@ -97,18 +162,18 @@ export default function AdminMedicinesPage() {
       if (editItem) {
         await updateMedicine(editItem.id, {
           name: form.name,
-          genericName: form.brand,
+          generic_name: form.brand,
           discipline: form.discipline,
           category: form.category,
-          standardDose: form.unit,
+          standard_dose: form.unit,
         });
       } else {
         await createMedicine({
           name: form.name,
-          genericName: form.brand,
+          generic_name: form.brand,
           discipline: form.discipline,
           category: form.category,
-          standardDose: form.unit,
+          standard_dose: form.unit,
         });
       }
       setShowForm(false);

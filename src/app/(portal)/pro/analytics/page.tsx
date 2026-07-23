@@ -3,7 +3,7 @@
 import { useState } from "react";
 import { cn } from "@/lib/utils";
 import { useAuth } from "@/contexts/auth-context";
-import { usePractitionerAnalytics } from "@/lib/hooks";
+import { usePractitionerAnalytics } from "@/hooks/use-analytics";
 
 type Period = "7d" | "30d" | "90d";
 

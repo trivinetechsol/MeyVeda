@@ -5,14 +5,11 @@ import Link from "next/link";
 import { ABHABadge } from "@/components/Badges";
 import { Progress } from "@/components/ui/progress";
 import { useAuth } from "@/contexts/auth-context";
-import {
-  usePatientProfile,
-  useDinacharyaTasks,
-  useHealthRecords,
-  usePatientPrescriptions,
-  usePractitionerAnalytics,
-  usePractitionerPrescriptions,
-} from "@/lib/hooks";
+import { usePatientProfile } from "@/hooks/use-profile";
+import { useDinacharyaTasks } from "@/hooks/use-dinacharya";
+import { usePractitionerAnalytics } from "@/hooks/use-analytics";
+import { useHealthRecords } from "@/hooks/use-emr";
+import { usePatientPrescriptions,usePractitionerPrescriptions } from "@/hooks/use-prescriptions";
 import { cn } from "@/lib/utils";
 import type { DinacharTask } from "@/lib/types";
 
@@ -40,9 +37,9 @@ const PRACTITIONER_MENU = [
 /* Stats are now derived from context/DB — no hardcoded arrays */
 
 export default function ProfilePage() {
-  const { user, updateUser, logout } = useAuth();
-  const { data: profile } = usePatientProfile(user?.id);
-  const { data: dbTasks } = useDinacharyaTasks(user?.id);
+  const { user, loading, updateUser, logout } = useAuth();
+  const { data: profile } = usePatientProfile(user?.role === "patient" ? user?.id : undefined);
+  const { data: dbTasks } = useDinacharyaTasks(user?.role === "patient" ? user?.id : undefined);
 
   // Patient details hooks
   const { data: patientRecords } = useHealthRecords(user?.role === "patient" ? user?.id : undefined);
@@ -57,6 +54,14 @@ export default function ProfilePage() {
   useEffect(() => {
     if (dbTasks && dbTasks.length > 0) setTasks(dbTasks);
   }, [dbTasks]);
+
+  if (loading || !user) {
+    return (
+      <div className="flex items-center justify-center min-h-[400px]">
+        <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-herb-green"></div>
+      </div>
+    );
+  }
 
   const completedCount = tasks.filter((t) => t.done).length;
   const progressPct = tasks.length > 0 ? Math.round((completedCount / tasks.length) * 100) : 0;
@@ -150,35 +155,63 @@ export default function ProfilePage() {
   const [form, setForm] = useState({
     name: user?.name ?? "",
     email: user?.email ?? "",
+    phone: user?.phone ?? "",
     dob: user?.dob ?? "",
     gender: user?.gender ?? "",
     bloodGroup: user?.bloodGroup ?? "",
-    ecName: user?.emergencyContact?.name ?? "",
-    ecPhone: user?.emergencyContact?.phone ?? "",
-    ecRelation: user?.emergencyContact?.relation ?? "",
   });
+
+  useEffect(() => {
+    if (user) {
+      setForm({
+        name: user.name ?? "",
+        email: user.email ?? "",
+        phone: user.phone ?? "",
+        dob: user.dob ?? "",
+        gender: user.gender ?? "",
+        bloodGroup: user.bloodGroup ?? "",
+      });
+    }
+  }, [user]);
 
   const initials = user?.name
     ? user.name.split(" ").map((w) => w[0]).join("").slice(0, 2).toUpperCase()
     : "U";
 
-  function handleSave() {
-    updateUser({
-      name: form.name.trim() || user?.name,
-      email: form.email.trim() || undefined,
+  async function handleSave() {
+    const payload = {
+      fullName: form.name.trim() || user?.name,
+      phone: form.phone.trim() || user?.phone,
       dob: form.dob || undefined,
       gender: form.gender || undefined,
       bloodGroup: form.bloodGroup || undefined,
-      emergencyContact:
-        form.ecName && form.ecPhone
-          ? { name: form.ecName, phone: form.ecPhone, relation: form.ecRelation }
-          : undefined,
-    });
-    setEditMode(false);
+    };
+    try {
+      const res = await fetch("/api/profile", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        throw new Error(data.message || data.error?.message || "Failed to update profile");
+      }
+      updateUser({
+        name: form.name.trim() || user?.name,
+        phone: form.phone.trim() || user?.phone,
+        dob: form.dob || undefined,
+        gender: form.gender || undefined,
+        bloodGroup: form.bloodGroup || undefined,
+      });
+      setEditMode(false);
+    } catch (err: any) {
+      console.error("Profile save error:", err);
+      alert(err.message || "Failed to save changes.");
+    }
   }
 
   return (
-    <div className="px-4 sm:px-6 lg:px-8 py-6 max-w-7xl mx-auto">
+    <div className="px-4 sm:px-6 lg:px-8 py-6 max-w-4xl mx-auto">
       {/* Hero */}
       <div className="bg-herb-gradient rounded-2xl px-6 py-8 mb-6 relative overflow-hidden">
         <div className="absolute -right-6 -top-6 w-36 h-36 rounded-full bg-white/5" />
@@ -260,20 +293,20 @@ export default function ProfilePage() {
               <input
                 type="email"
                 value={form.email}
-                onChange={(e) => setForm((p) => ({ ...p, email: e.target.value }))}
-                placeholder="your@email.com"
-                className="w-full text-sm border border-border rounded-xl px-3 py-2.5 focus:outline-none focus:border-herb-green/50 focus:ring-2 focus:ring-herb-green/10 transition-all placeholder:text-muted-foreground"
+                disabled
+                className="w-full text-sm border border-border rounded-xl px-3 py-2.5 bg-muted text-muted-foreground cursor-not-allowed"
               />
+              <p className="text-[10px] text-muted-foreground mt-1">Email cannot be changed</p>
             </div>
             <div>
               <label className="text-xs font-medium text-muted-foreground block mb-1.5">Phone</label>
               <input
                 type="text"
-                value={`+91 ${user?.phone ?? ""}`}
-                disabled
-                className="w-full text-sm border border-border rounded-xl px-3 py-2.5 bg-muted text-muted-foreground cursor-not-allowed"
+                value={form.phone}
+                onChange={(e) => setForm((p) => ({ ...p, phone: e.target.value }))}
+                placeholder="10-digit number"
+                className="w-full text-sm border border-border rounded-xl px-3 py-2.5 focus:outline-none focus:border-herb-green/50 focus:ring-2 focus:ring-herb-green/10 transition-all placeholder:text-muted-foreground"
               />
-              <p className="text-[10px] text-muted-foreground mt-1">Phone cannot be changed</p>
             </div>
             <div>
               <label className="text-xs font-medium text-muted-foreground block mb-1.5">Date of Birth</label>
@@ -308,41 +341,7 @@ export default function ProfilePage() {
             </div>
           </div>
 
-          <div className="border-t border-border pt-4 mb-4">
-            <h3 className="font-semibold text-foreground text-xs mb-3 uppercase tracking-wider text-muted-foreground">Emergency Contact</h3>
-            <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-              <div>
-                <label className="text-xs font-medium text-muted-foreground block mb-1.5">Name</label>
-                <input
-                  type="text"
-                  value={form.ecName}
-                  onChange={(e) => setForm((p) => ({ ...p, ecName: e.target.value }))}
-                  placeholder="Contact name"
-                  className="w-full text-sm border border-border rounded-xl px-3 py-2.5 focus:outline-none focus:border-herb-green/50 focus:ring-2 focus:ring-herb-green/10 transition-all placeholder:text-muted-foreground"
-                />
-              </div>
-              <div>
-                <label className="text-xs font-medium text-muted-foreground block mb-1.5">Phone</label>
-                <input
-                  type="tel"
-                  value={form.ecPhone}
-                  onChange={(e) => setForm((p) => ({ ...p, ecPhone: e.target.value }))}
-                  placeholder="10-digit number"
-                  className="w-full text-sm border border-border rounded-xl px-3 py-2.5 focus:outline-none focus:border-herb-green/50 focus:ring-2 focus:ring-herb-green/10 transition-all placeholder:text-muted-foreground"
-                />
-              </div>
-              <div>
-                <label className="text-xs font-medium text-muted-foreground block mb-1.5">Relation</label>
-                <input
-                  type="text"
-                  value={form.ecRelation}
-                  onChange={(e) => setForm((p) => ({ ...p, ecRelation: e.target.value }))}
-                  placeholder="e.g. Spouse"
-                  className="w-full text-sm border border-border rounded-xl px-3 py-2.5 focus:outline-none focus:border-herb-green/50 focus:ring-2 focus:ring-herb-green/10 transition-all placeholder:text-muted-foreground"
-                />
-              </div>
-            </div>
-          </div>
+
 
           <div className="flex gap-3">
             <button
@@ -361,11 +360,11 @@ export default function ProfilePage() {
         </div>
       )}
 
-      <div className="grid grid-cols-1 lg:grid-cols-[1fr_340px] gap-6">
+      <div className="space-y-6">
         {/* Left: Menu */}
         <div className="space-y-4">
           {/* Personal info summary (when not editing) */}
-          {!editMode && (user?.dob || user?.gender || user?.bloodGroup || user?.emergencyContact) && (
+          {!editMode && (user?.dob || user?.gender || user?.bloodGroup || user?.email || user?.phone) && (
             <div className="bg-white rounded-2xl border border-border p-5">
               <div className="flex items-center justify-between mb-3">
                 <h2 className="font-semibold text-foreground text-sm">Personal Details</h2>
@@ -396,14 +395,10 @@ export default function ProfilePage() {
                     <span className="text-xs font-medium text-foreground truncate">{user.email}</span>
                   </>
                 )}
-                {user?.emergencyContact && (
                   <>
-                    <span className="text-xs text-muted-foreground">Emergency Contact</span>
-                    <span className="text-xs font-medium text-foreground">
-                      {user.emergencyContact.name} ({user.emergencyContact.relation}) · {user.emergencyContact.phone}
-                    </span>
+                    <span className="text-xs text-muted-foreground">Phone</span>
+                    <span className="text-xs font-medium text-foreground">{user?.phone}</span>
                   </>
-                )}
               </div>
             </div>
           )}
@@ -435,52 +430,6 @@ export default function ProfilePage() {
           <p className="text-center text-[10px] text-muted-foreground">
             MeyVeda v1.0.0 · ABDM Compliant · Privacy First
           </p>
-        </div>
-
-        {/* Right: Wellness */}
-        <div className="space-y-4">
-          <div className="bg-white rounded-2xl border border-border p-5">
-            <div className="flex items-center justify-between mb-3">
-              <div>
-                <h2 className="font-semibold text-foreground text-sm">Wellness Score</h2>
-                <p className="text-xs text-muted-foreground mt-0.5">Based on Dinacharya adherence</p>
-              </div>
-              <span className="font-display text-3xl font-bold text-herb-green">{wellnessScore}</span>
-            </div>
-            <Progress value={wellnessScore} className="h-2 bg-sand" />
-            <div className="flex justify-between mt-2 text-[10px] text-muted-foreground">
-              <span>Needs improvement</span>
-              <span>Excellent</span>
-            </div>
-          </div>
-
-          <div className="bg-ivory-deep rounded-2xl border border-border p-5">
-            <div className="flex items-center justify-between mb-3">
-              <h2 className="font-semibold text-foreground text-sm">Your Prakriti</h2>
-              <span className="text-xs text-herb-green font-medium">{hasPrakriti ? "Assessed" : "Not Assessed"}</span>
-            </div>
-            <div className="flex gap-2">
-              {prakritiComposition.map((d) => (
-                <div key={d.dosha} className={`flex-1 rounded-xl p-2.5 text-center ${d.color}`}>
-                  <p className="font-bold text-sm font-display">{d.pct}%</p>
-                  <p className="text-[10px] font-medium mt-0.5">{d.dosha}</p>
-                </div>
-              ))}
-            </div>
-            <p className="text-xs text-muted-foreground mt-2.5">
-              {prakritiAdvice}
-            </p>
-          </div>
-
-          <div className="bg-white rounded-2xl border border-border p-5">
-            <h3 className="font-semibold text-foreground text-sm mb-3">Linked Devices</h3>
-            {["iPhone 15 Pro", "Apple Watch Series 9", "Omron BP Monitor"].map((d) => (
-              <div key={d} className="flex items-center justify-between py-2 border-b border-border last:border-0">
-                <p className="text-xs text-foreground">{d}</p>
-                <span className="text-[10px] text-herb-green">Synced ✓</span>
-              </div>
-            ))}
-          </div>
         </div>
       </div>
 

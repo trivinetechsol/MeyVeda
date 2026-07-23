@@ -1,35 +1,39 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import { cn } from "@/lib/utils";
 import { useAuth } from "@/contexts/auth-context";
-import type { AuthUser } from "@/contexts/auth-context";
-import { createClient } from "@/lib/supabase";
-import { sendOtp, verifyOtp } from "@/lib/otp-client";
+import { createClient } from "@/lib/supabase/client";
+import { toast } from "react-hot-toast";
+import { Upload, Shield, Award, User, Heart, AlertCircle, FileText, CheckCircle } from "lucide-react";
 
-type Step = "welcome" | "phone" | "otp" | "role" | "abha" | "patient-intake" | "practitioner-intake";
+type Step =
+  | "welcome"
+  | "phone"
+  | "otp"
+  | "role"
+  | "abha"
+  | "patient-intake"
+  | "doctor-intake"
+  | "doctor-documents"
+  | "success";
+
 type Flow = "new" | "returning";
 
-const HEALTH_GOALS = [
-  "Improve gut health", "Better sleep", "Stress management", "Joint pain relief",
-  "Immunity boost", "Weight balance", "Hormonal balance", "Skin health",
-  "Energy & vitality", "Chronic disease care", "Respiratory health", "Mental clarity",
-];
-
-const DISCIPLINE_PREFS = [
-  { id: "Ayurveda", icon: "🌿", desc: "Herbal & constitutional" },
-  { id: "Yoga", icon: "🧘", desc: "Movement & breathing" },
-  { id: "Naturopathy", icon: "☀️", desc: "Natural healing" },
-  { id: "Homeopathy", icon: "💧", desc: "Micro-dose remedies" },
-];
-
-const AYUSH_QUALIFICATIONS = ["BAMS", "BUMS", "BHMS", "BNYS", "MD (Ayu)", "MS (Ayu)", "PhD"];
+const AYUSH_QUALIFICATIONS = ["BAMS", "BHMS", "BUMS", "BNYS", "BSMS", "MD (Ayu)", "MS (Ayu)", "PhD"];
 const AYUSH_SPECIALTIES = [
-  "Panchakarma", "Kayachikitsa", "Prasuti & Stri Roga", "Kaumarabhritya",
-  "Shalya Tantra", "Shalakya Tantra", "Mano Vigyan", "Swasthavritta",
-  "Yoga Therapy", "Naturopathy", "Unani Internal Medicine",
+  "Kayachikitsa",
+  "Panchakarma",
+  "Shalya Tantra",
+  "Shalakya Tantra",
+  "Kaumarabhritya",
+  "Prasuti-Striroga",
+  "Agada Tantra",
+  "Rasayana-Vajikarana",
 ];
+
+const LANGUAGES = ["Hindi", "English", "Tamil", "Telugu", "Kannada", "Malayalam", "Marathi", "Bengali"];
 
 export default function OnboardingPage() {
   const router = useRouter();
@@ -39,35 +43,53 @@ export default function OnboardingPage() {
   const [flow, setFlow] = useState<Flow>("new");
   const [email, setEmail] = useState("");
   const [otp, setOtp] = useState(["", "", "", "", "", ""]);
-  const [resendTimer, setResendTimer] = useState(45);
-  const [role, setRole] = useState<"patient" | "practitioner" | null>(null);
-  const [abhaLinked, setAbhaLinked] = useState<boolean | null>(null);
-  const [aadhaar, setAadhaar] = useState("");
+  const [resendTimer, setResendTimer] = useState(300);
+  const [role, setRole] = useState<"patient" | "doctor" | null>(null);
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
 
   // Common intake
   const [fullName, setFullName] = useState("");
   const [dob, setDob] = useState("");
-  const [gender, setGender] = useState<"male" | "female" | "other" | "prefer_not_to_say" | "">("");
+  const [gender, setGender] = useState<"male" | "female" | "other" | "">("");
+  const [bloodGroup, setBloodGroup] = useState("");
 
-  // Patient intake
-  const [selectedGoals, setSelectedGoals] = useState<string[]>([]);
-  const [selectedDisciplines, setSelectedDisciplines] = useState<string[]>([]);
+  // Patient detailed intake
+  const [phone, setPhone] = useState("");
+  const [address, setAddress] = useState("");
+  const [abhaNumber, setAbhaNumber] = useState("");
+  const [emergencyContactName, setEmergencyContactName] = useState("");
+  const [emergencyContactPhone, setEmergencyContactPhone] = useState("");
+  const [allergiesText, setAllergiesText] = useState("");
+  const [conditionsText, setConditionsText] = useState("");
+  const [medsText, setMedsText] = useState("");
 
-  // Practitioner intake
+  // Doctor detailed intake
   const [hprNumber, setHprNumber] = useState("");
   const [selectedQuals, setSelectedQuals] = useState<string[]>([]);
   const [selectedSpecialty, setSelectedSpecialty] = useState("");
-  const [clinicName, setClinicName] = useState("");
+  const [selectedLanguages, setSelectedLanguages] = useState<string[]>([]);
+  const [consultationFee, setConsultationFee] = useState("");
+
+  // Doctor File uploads
+  const [degreeFile, setDegreeFile] = useState<File | null>(null);
+  const [registrationCertFile, setRegistrationCertFile] = useState<File | null>(null);
+  const [photoFile, setPhotoFile] = useState<File | null>(null);
+  const [signatureFile, setSignatureFile] = useState<File | null>(null);
 
   const STEPS_NEW: Step[] = ["welcome", "phone", "otp", "role", "abha", "patient-intake"];
   const STEPS_RETURNING: Step[] = ["welcome", "phone", "otp"];
   const stepsOrder = flow === "returning" ? STEPS_RETURNING : STEPS_NEW;
   const progressPct = step === "welcome" ? 0 : (stepsOrder.indexOf(step) / (stepsOrder.length - 1)) * 100;
 
+  const formatTimer = (seconds: number) => {
+    const mins = Math.floor(seconds / 60);
+    const secs = seconds % 60;
+    return `${String(mins).padStart(2, "0")}:${String(secs).padStart(2, "0")}`;
+  };
+
   function startResendTimer() {
-    let t = 45;
+    let t = 300;
     setResendTimer(t);
     const interval = setInterval(() => {
       t--;
@@ -81,18 +103,15 @@ export default function OnboardingPage() {
     setLoading(true);
     setError("");
     try {
-      // First check if user exists in flow='returning'
-      const supabase = createClient();
-      const { data: existingUser } = await supabase.from('users').select('id, role').eq('email', email).maybeSingle();
+      const res = await fetch("/api/auth/send-otp/", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ email }),
+      });
       
-      if (flow === "returning" && !existingUser) {
-        throw new Error("No account found with this email. Please sign up instead.");
-      }
-      if (flow === "new" && existingUser) {
-        throw new Error("An account with this email already exists. Please sign in.");
-      }
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || "Failed to send OTP.");
 
-      await sendOtp(email);
       startResendTimer();
       setStep("otp");
     } catch (err: any) {
@@ -104,14 +123,58 @@ export default function OnboardingPage() {
   }
 
   function handleOtpInput(index: number, val: string) {
-    if (val.length > 1) return;
+    const numericVal = val.replace(/\D/g, ""); // Allow only digits
+    if (!numericVal) {
+      const next = [...otp];
+      next[index] = "";
+      setOtp(next);
+      return;
+    }
     const next = [...otp];
-    next[index] = val;
+    next[index] = numericVal.slice(-1);
     setOtp(next);
-    if (val && index < 5) {
+    if (index < 5) {
       (document.getElementById(`otp-${index + 1}`) as HTMLInputElement)?.focus();
     }
   }
+
+  function handleOtpKeyDown(index: number, e: React.KeyboardEvent<HTMLInputElement>) {
+    if (e.key === "Backspace") {
+      const next = [...otp];
+      if (otp[index]) {
+        next[index] = "";
+        setOtp(next);
+      } else if (index > 0) {
+        next[index - 1] = "";
+        setOtp(next);
+        (document.getElementById(`otp-${index - 1}`) as HTMLInputElement)?.focus();
+      }
+    } else if (e.key === "ArrowLeft" && index > 0) {
+      (document.getElementById(`otp-${index - 1}`) as HTMLInputElement)?.focus();
+    } else if (e.key === "ArrowRight" && index < 5) {
+      (document.getElementById(`otp-${index + 1}`) as HTMLInputElement)?.focus();
+    }
+  }
+
+  function handleOtpPaste(e: React.ClipboardEvent<HTMLInputElement>) {
+    e.preventDefault();
+    const pastedData = e.clipboardData.getData("text").trim();
+    if (!/^\d{6}$/.test(pastedData)) return; // Only allow 6-digit numeric codes
+
+    const next = pastedData.split("");
+    setOtp(next);
+    
+    // Focus the last input
+    (document.getElementById("otp-5") as HTMLInputElement)?.focus();
+  }
+
+  useEffect(() => {
+    if (step === "otp") {
+      setTimeout(() => {
+        (document.getElementById("otp-0") as HTMLInputElement)?.focus();
+      }, 50);
+    }
+  }, [step]);
 
   async function handleVerifyOTP() {
     const otpString = otp.join("");
@@ -120,38 +183,35 @@ export default function OnboardingPage() {
     setError("");
 
     try {
-      await verifyOtp(email, otpString);
+      // Single API call handles both OTP verification and returning user check
+      const res = await fetch("/api/auth/login/", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ email, otp: otpString }),
+      });
 
-      if (flow === "returning") {
-        const supabase = createClient();
-        const { data: dbUser, error: userError } = await supabase
-          .from("users")
-          .select("id, email, mobile, role")
-          .eq("email", email)
-          .single();
-        
-        if (userError || !dbUser) throw new Error("Could not load user data.");
+      const data = await res.json();
 
-        let name = "Unknown";
-        if (dbUser.role === "practitioner") {
-          const { data: prac } = await supabase.from("practitioners").select("full_name").eq("user_id", dbUser.id).maybeSingle();
-          if (prac) name = prac.full_name;
-        } else {
-          const { data: pat } = await supabase.from("patients").select("full_name").eq("user_id", dbUser.id).maybeSingle();
-          if (pat) name = pat.full_name;
-        }
+      if (!res.ok) {
+        throw new Error(data.error || "Failed to verify OTP.");
+      }
 
+      if (data.data?.returning === false) {
+        // New user — OTP is verified, proceed to role selection
+        setFlow("new");
+        setStep("role");
+      } else {
+        // Returning user — successfully logged in
+        const { user: dbUser } = data.data;
         login({
           id: dbUser.id,
-          phone: dbUser.mobile || "",
+          phone: dbUser.phone || "",
           role: dbUser.role as any,
-          name,
+          name: dbUser.name,
           abhaLinked: true,
           email: dbUser.email,
         });
-        router.push(dbUser.role === "practitioner" ? "/pro" : "/discover");
-      } else {
-        setStep("role");
+        router.push(dbUser.role === "doctor" || dbUser.role === "practitioner" ? "/pro" : "/discover");
       }
     } catch (err: any) {
       console.error(err);
@@ -162,90 +222,158 @@ export default function OnboardingPage() {
   }
 
   async function finishPatient() {
+    if (abhaNumber && !/^\d{14}$/.test(abhaNumber.replace(/[-\s]/g, ""))) {
+      setError("ABHA ID must be exactly 14 digits");
+      return;
+    }
+
     setLoading(true);
     setError("");
     try {
-      const supabase = createClient();
-      const { data: newUser, error: userError } = await supabase.from('users').insert([{
-        email,
-        role: "patient"
-      }]).select().single();
+      const res = await fetch("/api/auth/onboard-patient/", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          fullName,
+          dateOfBirth: dob,
+          gender,
+          phone: phone || "",
+          email,
+          address,
+          abhaNumber: abhaNumber.replace(/[-\s]/g, ""),
+          emergencyContactName,
+          emergencyContactPhone,
+          allergies: allergiesText
+            ? allergiesText.split(",").map((x) => x.trim()).filter(Boolean)
+            : [],
+          chronicConditions: conditionsText
+            ? conditionsText.split(",").map((x) => x.trim()).filter(Boolean)
+            : [],
+          currentMedications: medsText
+            ? medsText.split(",").map((x) => x.trim()).filter(Boolean)
+            : [],
+        }),
+      });
 
-      if (userError) throw userError;
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || "Failed to create patient account.");
 
-      const { error: patientError } = await supabase.from('patients').insert([{
-        user_id: newUser.id,
-        full_name: fullName,
-        date_of_birth: dob,
-        gender: gender,
-        wellness_goals: selectedGoals
-      }]);
-
-      if (patientError) throw patientError;
-
-      login({ id: newUser.id, phone: "", role: "patient", name: fullName, abhaLinked: abhaLinked === true, email });
+      login({ id: data.data?.userId || "", phone: phone || "", role: "patient", name: fullName, abhaLinked: !!abhaNumber, email });
+      toast.success("Account created successfully!");
       router.push("/discover");
     } catch (err: any) {
       console.error(err);
-      setError(err.message || "Failed to create account.");
+      setError(err.message || "Failed to create patient account.");
     } finally {
       setLoading(false);
     }
   }
 
-  async function finishPractitioner() {
+  async function uploadStorageFile(bucket: string, path: string, file: File): Promise<string> {
+    const supabase = createClient();
+    const { data, error } = await supabase.storage.from(bucket).upload(path, file, {
+      cacheControl: "3600",
+      upsert: true,
+    });
+    if (error) throw error;
+    return `${bucket}/${data.path}`;
+  }
+
+  async function finishDoctor() {
+    if (!degreeFile || !registrationCertFile) {
+      setError("Please upload both Degree and Registration Certificates.");
+      return;
+    }
+
     setLoading(true);
     setError("");
     try {
-      const supabase = createClient();
-      const { data: newUser, error: userError } = await supabase.from('users').insert([{
-        email,
-        role: "practitioner"
-      }]).select().single();
+      // The user ID should ideally be fetched from the API, but for storage uploads on the client,
+      // we need to use a temporary ID or email. To fix this securely requires a signed upload URL.
+      // For now, use the email as a folder path to ensure uploads work without waiting for the DB id.
+      const uploadPrefix = email.replace(/[^a-zA-Z0-9]/g, "_");
 
-      if (userError) throw userError;
+      // Upload files (this might require RLS updates on the bucket if it previously relied on auth.uid())
+      const degreeUrl = await uploadStorageFile("doctor-documents", `${uploadPrefix}/degree_${Date.now()}_${degreeFile.name}`, degreeFile);
+      const registrationCertUrl = await uploadStorageFile("doctor-documents", `${uploadPrefix}/reg_${Date.now()}_${registrationCertFile.name}`, registrationCertFile);
 
-      const { error: pracError } = await supabase.from('practitioners').insert([{
-        user_id: newUser.id,
-        full_name: fullName,
-        gender: gender || null,
-        hpr_id: hprNumber || null,
-        qualifications: selectedQuals,
-        specializations: selectedSpecialty ? [selectedSpecialty] : [],
-        disciplines: selectedDisciplines.length > 0 ? selectedDisciplines : ["Ayurveda"],
-      }]);
+      let photoUrl = "";
+      if (photoFile) {
+        photoUrl = await uploadStorageFile("doctor-documents", `${uploadPrefix}/photo_${Date.now()}_${photoFile.name}`, photoFile);
+      }
 
-      if (pracError) throw pracError;
+      let signatureUrl = "";
+      if (signatureFile) {
+        signatureUrl = await uploadStorageFile("doctor-documents", `${uploadPrefix}/sig_${Date.now()}_${signatureFile.name}`, signatureFile);
+      }
 
-      login({ id: newUser.id, phone: "", role: "practitioner", name: fullName, abhaLinked: false, email });
-      router.push("/pro");
+      const res = await fetch("/api/auth/onboard-doctor/", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          email,
+          phone,
+          fullName,
+          photoUrl,
+          signatureUrl,
+          consultationFee: Math.round(parseFloat(consultationFee) * 100),
+          specializations: selectedSpecialty ? [selectedSpecialty] : ["Ayurveda"],
+          languages: selectedLanguages,
+          degreeUrl,
+          registrationCertUrl,
+          hprId: hprNumber || undefined,
+          dateOfBirth: dob || undefined,
+          gender: gender || undefined,
+          bloodGroup: bloodGroup || undefined,
+        })
+      });
+
+      const data = await res.json();
+      if (!res.ok) {
+        throw new Error(data.message || data.error || "Failed to save profile.");
+      }
+
+      // Update frontend AuthContext so client-side routing knows the user is a doctor
+      login({
+        id: data.data?.userId || "",
+        phone: phone || "",
+        role: "practitioner",
+        name: fullName,
+        abhaLinked: !!hprNumber,
+        email
+      });
+
+      setStep("success");
     } catch (err: any) {
       console.error(err);
-      setError(err.message || "Failed to create practitioner account.");
+      setError(err.message || "Failed to submit verification request.");
     } finally {
       setLoading(false);
     }
   }
 
-  function toggleGoal(g: string) {
-    setSelectedGoals((p) => p.includes(g) ? p.filter((x) => x !== g) : [...p, g]);
+  function toggleLanguage(l: string) {
+    setSelectedLanguages((prev) => (prev.includes(l) ? prev.filter((x) => x !== l) : [...prev, l]));
   }
 
   function toggleQual(q: string) {
-    setSelectedQuals((p) => p.includes(q) ? p.filter((x) => x !== q) : [...p, q]);
+    setSelectedQuals((prev) => (prev.includes(q) ? prev.filter((x) => x !== q) : [...prev, q]));
   }
 
   return (
     <div className="min-h-full flex items-center justify-center bg-background py-8 px-4">
-      <div className="w-full max-w-md">
-        {step !== "welcome" && (
+      <div className="w-full max-w-lg">
+        {step !== "welcome" && step !== "success" && (
           <div className="mb-6">
             <div className="flex items-center gap-3 mb-3">
               <button
                 onClick={() => {
-                  const prev = stepsOrder[stepsOrder.indexOf(step) - 1];
-                  if (prev) setStep(prev);
-                  else setStep("welcome");
+                  if (step === "otp") setStep("welcome");
+                  else if (step === "role") setStep("otp");
+                  else if (step === "abha") setStep("role");
+                  else if (step === "patient-intake") setStep("abha");
+                  else if (step === "doctor-intake") setStep("role");
+                  else if (step === "doctor-documents") setStep("doctor-intake");
                 }}
                 className="p-1.5 rounded-lg hover:bg-muted transition-colors"
               >
@@ -265,94 +393,88 @@ export default function OnboardingPage() {
 
         {/* ── Welcome ── */}
         {step === "welcome" && (
-          <div className="text-center">
-            <div className="w-20 h-20 rounded-3xl bg-herb-gradient flex items-center justify-center mb-6 shadow-lg mx-auto">
-              <span className="font-display text-white text-3xl font-bold">M</span>
-            </div>
-            <h1 className="font-display text-4xl font-bold text-foreground tracking-tight leading-tight">
-              Reinvent<br />
-              <span className="text-herb-green">You.</span>
-            </h1>
-            <p className="text-muted-foreground text-sm mt-4 leading-relaxed">
-              India&apos;s first AYUSH digital health ecosystem — connecting ancient healing wisdom with verified modern care.
-            </p>
-            <div className="flex gap-3 justify-center mt-8 flex-wrap">
-              {["🌿", "🧘", "☀️", "⚗️", "🔮", "💧"].map((icon, i) => (
-                <div key={i} className="w-10 h-10 rounded-xl bg-white border border-border shadow-sm flex items-center justify-center text-lg">
-                  {icon}
-                </div>
-              ))}
-            </div>
-            <p className="text-xs text-muted-foreground mt-2">Ayurveda · Yoga · Naturopathy · Unani · Siddha · Homeopathy</p>
-            <div className="flex items-center gap-2 mt-6 justify-center flex-wrap">
-              {["ABDM Compliant", "HPR Verified", "FHIR Records"].map((badge) => (
-                <span key={badge} className="text-[10px] bg-herb-green/10 text-herb-green font-semibold px-2.5 py-1 rounded-full border border-herb-green/20">
-                  ✓ {badge}
+          <div className="text-center w-full max-w-3xl mx-auto flex flex-col relative z-10 animate-in fade-in slide-in-from-bottom-8 duration-700">
+            {/* Background Subtle Glows (Scoped to welcome step container if needed, or just relying on page bg) */}
+            <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[600px] h-[600px] bg-gradient-to-tr from-blue-100/40 via-purple-100/40 to-transparent rounded-full blur-3xl opacity-60 pointer-events-none -z-10" />
+
+            {/* Hero Section */}
+            <div className="mb-10 flex flex-col items-center">
+              {/* Brand Logo */}
+              <h1 className="text-[48px] md:text-[56px] font-bold tracking-tight mb-4">
+                <span className="text-transparent bg-clip-text bg-gradient-to-r from-[#3B5BFF] to-[#A855F7] drop-shadow-sm">
+                  MeyVeda
                 </span>
-              ))}
+              </h1>
+              
+              {/* Tagline */}
+              <p className="text-[#6B7280] text-base md:text-lg font-medium leading-relaxed max-w-[500px] mx-auto">
+                India&apos;s first AYUSH digital health ecosystem — connecting ancient healing wisdom with verified modern care.
+              </p>
             </div>
-            <button
-              onClick={() => { setFlow("new"); setStep("phone"); }}
-              className="mt-8 w-full py-4 bg-herb-green text-white rounded-2xl text-base font-semibold hover:bg-herb-green/90 transition-all shadow-md"
-            >
-              Get Started
-            </button>
-            <button
-              onClick={() => { setFlow("returning"); setStep("phone"); }}
-              className="mt-3 w-full py-3 border border-border text-sm font-medium rounded-2xl hover:bg-muted transition-colors text-foreground"
-            >
-              Sign in to existing account
-            </button>
-          </div>
-        )}
 
-        {/* ── Email ── */}
-        {step === "phone" && (
-          <div>
-            <h2 className="font-display text-2xl font-semibold text-foreground mb-1">
-              {flow === "returning" ? "Welcome back" : "Enter your email"}
-            </h2>
-            <p className="text-sm text-muted-foreground mb-6">
-              {flow === "returning"
-                ? "Enter your registered email address to sign in"
-                : "We'll send a one-time password to verify"}
-            </p>
-            <div className="flex gap-3 mb-4">
-              <input
-                type="email"
-                value={email}
-                onChange={(e) => setEmail(e.target.value)}
-                placeholder="your.email@example.com"
-                className="flex-1 px-4 py-3 border border-border rounded-xl text-sm focus:outline-none focus:border-herb-green/50 focus:ring-2 focus:ring-herb-green/10"
-              />
+            {/* Welcome Section */}
+            <div className="mb-8 flex flex-col items-center">
+              <h2 className="text-[#111827] text-[32px] md:text-[36px] font-bold tracking-tight mb-3 leading-tight">
+                Create Your Account
+              </h2>
+              <p className="text-[#6B7280] text-base md:text-[18px] font-medium max-w-[450px]">
+                Begin your journey towards natural, holistic wellness.
+              </p>
             </div>
-            {flow === "new" && (
-              <p className="text-xs text-muted-foreground mb-4">Your ABHA ID may be automatically linked using Aadhaar later.</p>
-            )}
 
-            {error && (
-              <div className="bg-red-50 border border-red-200 rounded-xl px-3.5 py-2.5 text-sm text-red-700 mb-4">
-                {error}
+            {/* Email Input section */}
+            <div className="w-full flex flex-col items-center justify-center gap-4">
+              <div className="w-full max-w-[400px]">
+                <input
+                  type="email"
+                  value={email}
+                  onChange={(e) => setEmail(e.target.value)}
+                  placeholder="Enter your email address"
+                  className="w-full px-4 py-3 border border-border rounded-xl text-sm focus:outline-none focus:border-purple-500/50 focus:ring-2 focus:ring-purple-500/20 bg-white shadow-sm"
+                />
               </div>
-            )}
 
-            <button
-              onClick={() => { handleSendOTP(); }}
-              disabled={!email || !email.includes("@")}
-              className={cn("w-full py-3.5 rounded-xl text-sm font-semibold transition-all",
-                (email && email.includes("@")) ? "bg-herb-green text-white hover:bg-herb-green/90 shadow-md" : "bg-muted text-muted-foreground cursor-not-allowed")}
-            >
-              {loading ? "Sending..." : "Send OTP"}
-            </button>
+              {error && (
+                <div className="bg-red-50 border border-red-200 rounded-xl px-3.5 py-2.5 text-sm text-red-700 w-full max-w-[400px] flex items-start gap-2 text-left">
+                  <AlertCircle size={16} className="mt-0.5 min-w-[16px]" />
+                  <span>{error}</span>
+                </div>
+              )}
+
+              <button
+                onClick={() => { handleSendOTP(); }}
+                disabled={!email || !email.includes("@")}
+                className="w-full max-w-[400px] h-[52px] rounded-[14px] bg-gradient-to-r from-[#3B5BFF] to-[#A855F7] text-white text-base font-semibold flex items-center justify-center gap-2 transition-all duration-300 ease-out hover:-translate-y-0.5 hover:shadow-lg hover:shadow-purple-500/25 active:translate-y-0 active:shadow-md cursor-pointer focus:outline-none focus-visible:ring-4 focus-visible:ring-purple-500/30 disabled:opacity-50 disabled:cursor-not-allowed group"
+              >
+                {loading ? "Sending OTP..." : "Continue"}
+                {!loading && (
+                  <svg className="w-4 h-4 transition-transform duration-300 group-hover:translate-x-1" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2.5}>
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M5 12h14M12 5l7 7-7 7" />
+                  </svg>
+                )}
+              </button>
+            </div>
           </div>
         )}
 
         {/* ── OTP ── */}
         {step === "otp" && (
-          <div>
-            <h2 className="font-display text-2xl font-semibold text-foreground mb-1">Verify OTP</h2>
-            <p className="text-sm text-muted-foreground mb-6">Sent to {email}</p>
-            <div className="flex gap-3 justify-center mb-6">
+          <div className="text-center">
+            {/* Security Shield Icon Header */}
+            <div className="mx-auto w-16 h-16 bg-herb-green/10 rounded-2xl flex items-center justify-center mb-6 animate-pulse">
+              <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="var(--primary)" strokeWidth={2}>
+                <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z" />
+              </svg>
+            </div>
+
+            <h2 className="font-display text-2xl font-bold text-foreground mb-1">Verify OTP</h2>
+            <p className="text-sm text-muted-foreground mb-8 leading-relaxed">
+              We sent a 6-digit confirmation code to <br/>
+              <span className="font-medium text-foreground">{email}</span>
+            </p>
+
+            {/* Input boxes with modern styling */}
+            <div className="flex gap-2.5 justify-center mb-8">
               {otp.map((digit, i) => (
                 <input
                   key={i}
@@ -362,48 +484,78 @@ export default function OnboardingPage() {
                   maxLength={1}
                   value={digit}
                   onChange={(e) => handleOtpInput(i, e.target.value)}
-                  className="w-14 h-14 text-center text-xl font-bold border-2 rounded-xl focus:outline-none focus:border-herb-green transition-all border-border"
+                  onKeyDown={(e) => handleOtpKeyDown(i, e)}
+                  onPaste={handleOtpPaste}
+                  className={cn(
+                    "w-11 h-14 text-center text-xl font-bold font-mono border rounded-2xl transition-all duration-200 bg-background shadow-sm focus:outline-none focus:ring-4 focus:ring-herb-green/15 focus:scale-105",
+                    digit ? "border-herb-green border-2 bg-herb-green/5" : "border-border hover:border-muted-foreground/30 focus:border-herb-green"
+                  )}
                 />
               ))}
             </div>
-            <div className="text-center mb-6">
-              {resendTimer > 0 ? (
-                <p className="text-xs text-muted-foreground">Resend OTP in {resendTimer}s</p>
-              ) : (
-                <button onClick={handleSendOTP} className="text-xs text-herb-green font-medium">Resend OTP</button>
+
+            {/* Countdown / Resend UI */}
+            <div className="flex justify-between items-center mb-8">
+              <span className="text-[11px] text-muted-foreground">
+                {resendTimer > 0 ? `Expires in ${formatTimer(resendTimer)}` : "OTP Expired"}
+              </span>
+              {resendTimer === 0 && (
+                <button
+                  type="button"
+                  onClick={handleSendOTP}
+                  className="text-[11px] text-herb-green font-medium hover:underline"
+                >
+                  Resend OTP
+                </button>
               )}
             </div>
+
             {error && (
-              <div className="bg-red-50 border border-red-200 rounded-xl px-3.5 py-2.5 text-sm text-red-700 mb-4">
-                {error}
+              <div className="bg-red-50 border border-red-200 rounded-xl px-3.5 py-2.5 text-sm text-red-700 mb-6 flex items-start gap-2 text-left">
+                <AlertCircle size={16} className="mt-0.5 flex-shrink-0" />
+                <span>{error}</span>
               </div>
             )}
+
             <button
               onClick={handleVerifyOTP}
               disabled={otp.join("").length < 6 || loading}
-              className={cn("w-full py-3.5 rounded-xl text-sm font-semibold transition-all",
-                otp.join("").length === 6 ? "bg-herb-green text-white hover:bg-herb-green/90 shadow-md" : "bg-muted text-muted-foreground cursor-not-allowed")}
+              className={cn(
+                "w-full py-3.5 rounded-xl text-sm font-semibold transition-all flex items-center justify-center gap-2",
+                otp.join("").length === 6 && !loading
+                  ? "bg-herb-green text-white hover:bg-herb-green/90 shadow-md hover:shadow-lg active:scale-[0.99]"
+                  : "bg-muted text-muted-foreground cursor-not-allowed"
+              )}
             >
-              {loading ? "Verifying..." : flow === "returning" ? "Sign In" : "Verify & Continue"}
+              {loading ? (
+                <>
+                  <div className="w-4 h-4 rounded-full border-2 border-current border-t-transparent animate-spin" />
+                  <span>Verifying...</span>
+                </>
+              ) : (
+                <span>{flow === "returning" ? "Sign In" : "Verify & Continue"}</span>
+              )}
             </button>
           </div>
         )}
 
-        {/* ── Role ── */}
+        {/* ── Role Selection ── */}
         {step === "role" && (
           <div>
-            <h2 className="font-display text-2xl font-semibold text-foreground mb-1">How will you use MeyVeda?</h2>
+            <h2 className="font-display text-2xl font-bold text-foreground mb-1">How will you use MeyVeda?</h2>
             <p className="text-sm text-muted-foreground mb-6">Choose your primary role</p>
             <div className="space-y-3 mb-6">
               {[
                 { id: "patient" as const, icon: "🏥", title: "Patient / Health Seeker", desc: "Book consultations, manage health records, track wellness" },
-                { id: "practitioner" as const, icon: "🩺", title: "AYUSH Practitioner", desc: "Manage patients, prescribe, track practice with EMR" },
+                { id: "doctor" as const, icon: "🩺", title: "AYUSH Doctor / Specialist", desc: "Consult patients, write digital EMR prescriptions, build practice" },
               ].map((r) => (
                 <button
                   key={r.id}
                   onClick={() => setRole(r.id)}
-                  className={cn("w-full flex items-start gap-4 p-4 rounded-2xl border-2 text-left transition-all",
-                    role === r.id ? "border-herb-green bg-herb-green/5" : "border-border hover:border-herb-green/30")}
+                  className={cn(
+                    "w-full flex items-start gap-4 p-4 rounded-2xl border-2 text-left transition-all",
+                    role === r.id ? "border-herb-green bg-herb-green/5 shadow-sm" : "border-border hover:border-herb-green/30 bg-white"
+                  )}
                 >
                   <span className="text-3xl flex-shrink-0">{r.icon}</span>
                   <div>
@@ -415,103 +567,279 @@ export default function OnboardingPage() {
             </div>
             <button
               onClick={() => {
-                if (role === "practitioner") setStep("practitioner-intake");
+                if (role === "doctor") setStep("doctor-intake");
                 else setStep("abha");
               }}
               disabled={!role}
-              className={cn("w-full py-3.5 rounded-xl text-sm font-semibold transition-all",
-                role ? "bg-herb-green text-white hover:bg-herb-green/90 shadow-md" : "bg-muted text-muted-foreground cursor-not-allowed")}
+              className={cn(
+                "w-full py-3.5 rounded-xl text-sm font-semibold transition-all",
+                role ? "bg-herb-green text-white hover:bg-herb-green/90 shadow-md" : "bg-muted text-muted-foreground cursor-not-allowed"
+              )}
             >
               Continue
             </button>
           </div>
         )}
 
-        {/* ── ABHA (patient only) ── */}
+        {/* ── ABHA ID Verification (patient only) ── */}
         {step === "abha" && (
           <div>
             <div className="flex items-center gap-3 mb-1">
               <div className="w-10 h-10 rounded-xl bg-herb-green/10 flex items-center justify-center">
-                <span className="text-xl">🛡️</span>
+                <Shield size={20} className="text-herb-green" />
               </div>
-              <h2 className="font-display text-2xl font-semibold text-foreground">Link ABHA ID</h2>
+              <h2 className="font-display text-2xl font-bold text-foreground">ABHA Card & ID</h2>
             </div>
             <p className="text-sm text-muted-foreground mb-6">
-              ABHA (Ayushman Bharat Health Account) enables seamless health record sharing across India.
+              ABHA (Ayushman Bharat Health Account) enables seamless secure sharing of health records across India.
             </p>
-            <div className="space-y-3 mb-4">
-              {[true, false].map((link) => (
-                <button
-                  key={link.toString()}
-                  onClick={() => setAbhaLinked(link)}
-                  className={cn("w-full flex items-center gap-3 p-4 rounded-2xl border-2 text-left transition-all",
-                    abhaLinked === link ? "border-herb-green bg-herb-green/5" : "border-border hover:border-herb-green/30")}
-                >
-                  <div className={cn("w-5 h-5 rounded-full border-2 flex items-center justify-center flex-shrink-0",
-                    abhaLinked === link ? "border-herb-green bg-herb-green" : "border-muted-foreground/40")}>
-                    {abhaLinked === link && <div className="w-2 h-2 rounded-full bg-white" />}
+            <div className="space-y-4">
+              <div>
+                <label className="text-xs font-semibold text-foreground block mb-1.5">ABHA ID (14 digits) - Optional</label>
+                <input
+                  type="text"
+                  maxLength={14}
+                  value={abhaNumber}
+                  onChange={(e) => setAbhaNumber(e.target.value.replace(/\D/g, ""))}
+                  placeholder="e.g. 12345678901234"
+                  className="w-full px-4 py-3 border border-border rounded-xl text-sm focus:outline-none focus:border-herb-green/50 bg-white font-mono tracking-widest text-center"
+                />
+                {abhaNumber && abhaNumber.length !== 14 && (
+                  <p className="text-xs text-red-500 mt-1">Must be exactly 14 digits ({abhaNumber.length}/14)</p>
+                )}
+              </div>
+            </div>
+            <div className="mt-8 flex gap-3">
+              <button
+                onClick={() => { setAbhaNumber(""); setStep("patient-intake"); }}
+                className="flex-1 py-3.5 border border-border text-sm font-semibold rounded-xl hover:bg-muted transition-colors text-foreground"
+              >
+                Skip / Do Later
+              </button>
+              <button
+                onClick={() => setStep("patient-intake")}
+                disabled={abhaNumber.length > 0 && abhaNumber.length !== 14}
+                className={cn(
+                  "flex-1 py-3.5 rounded-xl text-sm font-semibold transition-all",
+                  !(abhaNumber.length > 0 && abhaNumber.length !== 14)
+                    ? "bg-herb-green text-white hover:bg-herb-green/90 shadow-md"
+                    : "bg-muted text-muted-foreground cursor-not-allowed"
+                )}
+              >
+                Continue
+              </button>
+            </div>
+          </div>
+        )}
+
+        {/* ── Patient Intake Form ── */}
+        {step === "patient-intake" && (
+          <div>
+            <h2 className="font-display text-2xl font-bold text-foreground mb-1">Create Patient Profile</h2>
+            <p className="text-sm text-muted-foreground mb-6">Complete your clinical health record profile</p>
+
+            <div className="space-y-4 max-h-[60vh] overflow-y-auto pr-1 pb-4">
+              {/* Personal */}
+              <div className="space-y-3">
+                <p className="text-xs font-bold text-herb-green uppercase tracking-wider">Personal Information</p>
+                <div>
+                  <label className="text-xs font-semibold text-foreground block mb-1">Full Name</label>
+                  <input
+                    required
+                    type="text"
+                    value={fullName}
+                    onChange={(e) => setFullName(e.target.value)}
+                    placeholder="e.g. Rohit Kumar"
+                    className="w-full px-4 py-2.5 border border-border rounded-xl text-sm focus:outline-none focus:border-herb-green/50 bg-white"
+                  />
+                </div>
+                <div className="grid grid-cols-2 gap-3">
+                  <div>
+                    <label className="text-xs font-semibold text-foreground block mb-1">Date of Birth</label>
+                    <input
+                      required
+                      type="date"
+                      value={dob}
+                      onChange={(e) => setDob(e.target.value)}
+                      className="w-full px-4 py-2.5 border border-border rounded-xl text-sm focus:outline-none focus:border-herb-green/50 bg-white text-muted-foreground"
+                    />
                   </div>
                   <div>
-                    <p className="text-sm font-semibold text-foreground">{link ? "Yes, link my ABHA ID" : "Skip for now"}</p>
-                    <p className="text-xs text-muted-foreground">{link ? "Link via Aadhaar OTP — takes 60 seconds" : "You can link later from Profile → ABHA & ABDM"}</p>
+                    <label className="text-xs font-semibold text-foreground block mb-1">Gender</label>
+                    <select
+                      required
+                      value={gender}
+                      onChange={(e) => setGender(e.target.value as any)}
+                      className="w-full px-4 py-2.5 border border-border rounded-xl text-sm focus:outline-none focus:border-herb-green/50 bg-white"
+                    >
+                      <option value="">Select gender</option>
+                      <option value="male">Male</option>
+                      <option value="female">Female</option>
+                      <option value="other">Other</option>
+                    </select>
                   </div>
-                </button>
-              ))}
+                </div>
+                <div className="grid grid-cols-2 gap-3">
+                  <div>
+                    <label className="text-xs font-semibold text-foreground block mb-1">Phone Number</label>
+                    <input
+                      required
+                      type="tel"
+                      value={phone}
+                      onChange={(e) => setPhone(e.target.value)}
+                      placeholder="10-digit mobile"
+                      className="w-full px-4 py-2.5 border border-border rounded-xl text-sm focus:outline-none focus:border-herb-green/50 bg-white"
+                    />
+                  </div>
+                  <div>
+                    <label className="text-xs font-semibold text-foreground block mb-1">Address</label>
+                    <input
+                      type="text"
+                      value={address}
+                      onChange={(e) => setAddress(e.target.value)}
+                      placeholder="City, State"
+                      className="w-full px-4 py-2.5 border border-border rounded-xl text-sm focus:outline-none focus:border-herb-green/50 bg-white"
+                    />
+                  </div>
+                </div>
+              </div>
+
+              {/* Emergency Contact */}
+              <div className="space-y-3 pt-2">
+                <p className="text-xs font-bold text-herb-green uppercase tracking-wider">Emergency Contact</p>
+                <div className="grid grid-cols-2 gap-3">
+                  <div>
+                    <label className="text-xs font-semibold text-foreground block mb-1">Contact Person</label>
+                    <input
+                      type="text"
+                      value={emergencyContactName}
+                      onChange={(e) => setEmergencyContactName(e.target.value)}
+                      placeholder="Name"
+                      className="w-full px-4 py-2.5 border border-border rounded-xl text-sm focus:outline-none focus:border-herb-green/50 bg-white"
+                    />
+                  </div>
+                  <div>
+                    <label className="text-xs font-semibold text-foreground block mb-1">Contact Phone</label>
+                    <input
+                      type="tel"
+                      value={emergencyContactPhone}
+                      onChange={(e) => setEmergencyContactPhone(e.target.value)}
+                      placeholder="Phone"
+                      className="w-full px-4 py-2.5 border border-border rounded-xl text-sm focus:outline-none focus:border-herb-green/50 bg-white"
+                    />
+                  </div>
+                </div>
+              </div>
+
+              {/* Clinical Details */}
+              <div className="space-y-3 pt-2">
+                <p className="text-xs font-bold text-herb-green uppercase tracking-wider">Clinical details</p>
+                <div>
+                  <label className="text-xs font-semibold text-foreground block mb-1">Allergies (comma-separated)</label>
+                  <input
+                    type="text"
+                    value={allergiesText}
+                    onChange={(e) => setAllergiesText(e.target.value)}
+                    placeholder="e.g. Peanuts, Penicillin, Dust"
+                    className="w-full px-4 py-2.5 border border-border rounded-xl text-sm focus:outline-none focus:border-herb-green/50 bg-white"
+                  />
+                </div>
+                <div>
+                  <label className="text-xs font-semibold text-foreground block mb-1">Chronic Conditions (comma-separated)</label>
+                  <input
+                    type="text"
+                    value={conditionsText}
+                    onChange={(e) => setConditionsText(e.target.value)}
+                    placeholder="e.g. Hypertension, Type 2 Diabetes"
+                    className="w-full px-4 py-2.5 border border-border rounded-xl text-sm focus:outline-none focus:border-herb-green/50 bg-white"
+                  />
+                </div>
+                <div>
+                  <label className="text-xs font-semibold text-foreground block mb-1">Current Medications (comma-separated)</label>
+                  <input
+                    type="text"
+                    value={medsText}
+                    onChange={(e) => setMedsText(e.target.value)}
+                    placeholder="e.g. Metformin 500mg, Amlodipine 5mg"
+                    className="w-full px-4 py-2.5 border border-border rounded-xl text-sm focus:outline-none focus:border-herb-green/50 bg-white"
+                  />
+                </div>
+              </div>
             </div>
-            {abhaLinked && (
-              <input
-                type="text"
-                maxLength={12}
-                value={aadhaar}
-                onChange={(e) => setAadhaar(e.target.value.replace(/\D/g, ""))}
-                placeholder="Enter 12-digit Aadhaar number"
-                className="w-full px-4 py-3 border border-border rounded-xl text-sm mb-4 focus:outline-none focus:border-herb-green/50"
-              />
+
+            {error && (
+              <div className="bg-red-50 border border-red-200 rounded-xl px-3.5 py-2.5 text-sm text-red-700 mt-4 flex items-start gap-2">
+                <AlertCircle size={16} className="mt-0.5" />
+                <span>{error}</span>
+              </div>
             )}
+
             <button
-              onClick={() => setStep("patient-intake")}
-              disabled={abhaLinked === null}
-              className={cn("w-full py-3.5 rounded-xl text-sm font-semibold transition-all",
-                abhaLinked !== null ? "bg-herb-green text-white hover:bg-herb-green/90 shadow-md" : "bg-muted text-muted-foreground cursor-not-allowed")}
+              onClick={finishPatient}
+              disabled={!fullName || !dob || !gender || !phone || loading}
+              className={cn(
+                "w-full py-3.5 mt-6 bg-herb-green text-white rounded-xl text-sm font-semibold transition-all shadow-md",
+                !fullName || !dob || !gender || !phone || loading
+                  ? "opacity-60 cursor-not-allowed"
+                  : "hover:bg-herb-green/90 active:scale-98"
+              )}
             >
-              {abhaLinked ? "Link & Continue" : "Continue"}
+              {loading ? "Creating Profile..." : "Register Profile ✨"}
             </button>
           </div>
         )}
 
-        {/* ── Patient Intake ── */}
-        {step === "patient-intake" && (
+        {/* ── Doctor Intake Form ── */}
+        {step === "doctor-intake" && (
           <div>
-            <h2 className="font-display text-2xl font-semibold text-foreground mb-1">Your Details & Goals</h2>
-            <p className="text-sm text-muted-foreground mb-6">Help us personalise your MeyVeda experience</p>
+            <h2 className="font-display text-2xl font-bold text-foreground mb-1">Doctor Profile Details</h2>
+            <p className="text-sm text-muted-foreground mb-6 font-medium">Set up your specialty, languages, and practice fee</p>
 
-            <div className="space-y-4 mb-6">
+            <div className="space-y-4 max-h-[60vh] overflow-y-auto pr-1 pb-4">
               <div>
-                <label className="text-xs font-semibold text-muted-foreground uppercase tracking-wider block mb-1.5">Full Name</label>
+                <label className="text-xs font-semibold text-foreground block mb-1">Full Name (with Dr. prefix)</label>
                 <input
+                  required
                   type="text"
                   value={fullName}
                   onChange={(e) => setFullName(e.target.value)}
-                  placeholder="e.g. Rohit Kumar"
-                  className="w-full px-4 py-3 border border-border rounded-xl text-sm focus:outline-none focus:border-herb-green/50 focus:ring-2 focus:ring-herb-green/10"
+                  placeholder="e.g. Dr. Ramesh Kumar"
+                  className="w-full px-4 py-2.5 border border-border rounded-xl text-sm focus:outline-none focus:border-herb-green/50 bg-white"
                 />
               </div>
+
               <div className="grid grid-cols-2 gap-3">
                 <div>
-                  <label className="text-xs font-semibold text-muted-foreground uppercase tracking-wider block mb-1.5">Date of Birth</label>
+                  <label className="text-xs font-semibold text-foreground block mb-1">Phone Number</label>
                   <input
-                    type="date"
-                    value={dob}
-                    onChange={(e) => setDob(e.target.value)}
-                    className="w-full px-4 py-3 border border-border rounded-xl text-sm focus:outline-none focus:border-herb-green/50 bg-white"
+                    required
+                    type="tel"
+                    value={phone}
+                    onChange={(e) => setPhone(e.target.value)}
+                    placeholder="10-digit mobile"
+                    className="w-full px-4 py-2.5 border border-border rounded-xl text-sm focus:outline-none focus:border-herb-green/50 bg-white"
                   />
                 </div>
                 <div>
-                  <label className="text-xs font-semibold text-muted-foreground uppercase tracking-wider block mb-1.5">Gender</label>
+                  <label className="text-xs font-semibold text-foreground block mb-1">Date of Birth</label>
+                  <input
+                    required
+                    type="date"
+                    value={dob}
+                    onChange={(e) => setDob(e.target.value)}
+                    className="w-full px-4 py-2.5 border border-border rounded-xl text-sm focus:outline-none focus:border-herb-green/50 bg-white text-muted-foreground"
+                  />
+                </div>
+              </div>
+
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="text-xs font-semibold text-foreground block mb-1">Gender</label>
                   <select
+                    required
                     value={gender}
                     onChange={(e) => setGender(e.target.value as any)}
-                    className="w-full px-4 py-3 border border-border rounded-xl text-sm focus:outline-none focus:border-herb-green/50 bg-white"
+                    className="w-full px-4 py-2.5 border border-border rounded-xl text-sm focus:outline-none focus:border-herb-green/50 bg-white"
                   >
                     <option value="">Select gender</option>
                     <option value="male">Male</option>
@@ -519,125 +847,58 @@ export default function OnboardingPage() {
                     <option value="other">Other</option>
                   </select>
                 </div>
-              </div>
-            </div>
-
-            <div className="mb-5">
-              <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-3">Health Goals (select all that apply)</p>
-              <div className="flex flex-wrap gap-2">
-                {HEALTH_GOALS.map((goal) => (
-                  <button
-                    key={goal}
-                    onClick={() => toggleGoal(goal)}
-                    className={cn("text-xs px-3 py-1.5 rounded-full border transition-all",
-                      selectedGoals.includes(goal) ? "bg-herb-green text-white border-herb-green" : "border-border text-muted-foreground hover:border-herb-green/40")}
+                <div>
+                  <label className="text-xs font-semibold text-foreground block mb-1">Blood Group</label>
+                  <select
+                    value={bloodGroup}
+                    onChange={(e) => setBloodGroup(e.target.value)}
+                    className="w-full px-4 py-2.5 border border-border rounded-xl text-sm focus:outline-none focus:border-herb-green/50 bg-white"
                   >
-                    {goal}
-                  </button>
-                ))}
+                    <option value="">Select blood group</option>
+                    {["A+", "A-", "B+", "B-", "AB+", "AB-", "O+", "O-"].map(bg => (
+                      <option key={bg} value={bg}>{bg}</option>
+                    ))}
+                  </select>
+                </div>
               </div>
-            </div>
-            <div className="mb-6">
-              <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-3">Preferred AYUSH Disciplines</p>
-              <div className="grid grid-cols-2 gap-2">
-                {DISCIPLINE_PREFS.map((d) => (
-                  <button
-                    key={d.id}
-                    onClick={() => setSelectedDisciplines((p) => p.includes(d.id) ? p.filter((x) => x !== d.id) : [...p, d.id])}
-                    className={cn("flex items-center gap-2 p-3 rounded-xl border text-left transition-all",
-                      selectedDisciplines.includes(d.id) ? "border-herb-green bg-herb-green/5" : "border-border hover:border-herb-green/30")}
-                  >
-                    <span className="text-xl">{d.icon}</span>
-                    <div>
-                      <p className="text-xs font-semibold text-foreground">{d.id}</p>
-                      <p className="text-[10px] text-muted-foreground">{d.desc}</p>
-                    </div>
-                  </button>
-                ))}
-              </div>
-            </div>
-            {error && (
-              <div className="bg-red-50 border border-red-200 rounded-xl px-3.5 py-2.5 text-sm text-red-700 mb-4">
-                {error}
-              </div>
-            )}
-            <button
-              onClick={finishPatient}
-              disabled={!fullName || !dob || !gender || loading}
-              className={cn("w-full py-3.5 bg-herb-green text-white rounded-xl text-sm font-semibold transition-all shadow-md",
-                (!fullName || !dob || !gender || loading) ? "opacity-60 cursor-not-allowed" : "hover:bg-herb-green/90")}
-            >
-              {loading ? "Creating account..." : "Enter MeyVeda ✨"}
-            </button>
-          </div>
-        )}
 
-        {/* ── Practitioner Intake ── */}
-        {step === "practitioner-intake" && (
-          <div>
-            <div className="flex items-center gap-3 mb-1">
-              <div className="w-10 h-10 rounded-xl bg-copper/10 flex items-center justify-center">
-                <span className="text-xl">🩺</span>
-              </div>
-              <h2 className="font-display text-2xl font-semibold text-foreground">Practitioner Details</h2>
-            </div>
-            <p className="text-sm text-muted-foreground mb-6">Help us verify and set up your practitioner profile.</p>
-
-            <div className="space-y-4 mb-5">
-              <div>
-                <label className="text-xs font-semibold text-muted-foreground uppercase tracking-wider block mb-1.5">
-                  Full Name
-                </label>
-                <input
-                  type="text"
-                  value={fullName}
-                  onChange={(e) => setFullName(e.target.value)}
-                  placeholder="e.g. Dr. Aditi Shastri"
-                  className="w-full px-4 py-3 border border-border rounded-xl text-sm focus:outline-none focus:border-copper/50 focus:ring-2 focus:ring-copper/10"
-                />
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="text-xs font-semibold text-foreground block mb-1">HPR ID (optional)</label>
+                  <input
+                    type="text"
+                    value={hprNumber}
+                    onChange={(e) => setHprNumber(e.target.value)}
+                    placeholder="e.g. HPR-1234-5678"
+                    className="w-full px-4 py-2.5 border border-border rounded-xl text-sm focus:outline-none focus:border-herb-green/50 bg-white"
+                  />
+                </div>
+                <div>
+                  <label className="text-xs font-semibold text-foreground block mb-1">Consultation Fee (in INR)</label>
+                  <input
+                    required
+                    type="number"
+                    value={consultationFee}
+                    onChange={(e) => setConsultationFee(e.target.value)}
+                    placeholder="e.g. 500"
+                    className="w-full px-4 py-2.5 border border-border rounded-xl text-sm focus:outline-none focus:border-herb-green/50 bg-white"
+                  />
+                </div>
               </div>
 
               <div>
-                <label className="text-xs font-semibold text-muted-foreground uppercase tracking-wider block mb-1.5">
-                  Gender
-                </label>
-                <select
-                  value={gender}
-                  onChange={(e) => setGender(e.target.value as any)}
-                  className="w-full px-4 py-3 border border-border rounded-xl text-sm focus:outline-none focus:border-copper/50 bg-white"
-                >
-                  <option value="">Select gender</option>
-                  <option value="male">Male</option>
-                  <option value="female">Female</option>
-                  <option value="other">Other</option>
-                </select>
-              </div>
-
-              <div>
-                <label className="text-xs font-semibold text-muted-foreground uppercase tracking-wider block mb-1.5">
-                  HPR Registration Number
-                </label>
-                <input
-                  type="text"
-                  value={hprNumber}
-                  onChange={(e) => setHprNumber(e.target.value)}
-                  placeholder="e.g. HPR-4902-8822"
-                  className="w-full px-4 py-3 border border-border rounded-xl text-sm focus:outline-none focus:border-copper/50 focus:ring-2 focus:ring-copper/10"
-                />
-                <p className="text-[10px] text-muted-foreground mt-1">Your Health Professional Registry ID from NMC / AYUSH council</p>
-              </div>
-
-              <div>
-                <label className="text-xs font-semibold text-muted-foreground uppercase tracking-wider block mb-2">
-                  Qualifications (select all that apply)
-                </label>
-                <div className="flex flex-wrap gap-2">
+                <label className="text-xs font-semibold text-foreground block mb-1.5">AYUSH Qualifications</label>
+                <div className="flex flex-wrap gap-1.5">
                   {AYUSH_QUALIFICATIONS.map((q) => (
                     <button
                       key={q}
                       onClick={() => toggleQual(q)}
-                      className={cn("text-xs px-3 py-1.5 rounded-full border transition-all",
-                        selectedQuals.includes(q) ? "bg-copper text-white border-copper" : "border-border text-muted-foreground hover:border-copper/40")}
+                      className={cn(
+                        "text-xs px-3 py-1.5 rounded-full border transition-all font-medium",
+                        selectedQuals.includes(q)
+                          ? "bg-herb-green text-white border-herb-green"
+                          : "border-border text-muted-foreground hover:border-herb-green/40 bg-white"
+                      )}
                     >
                       {q}
                     </button>
@@ -646,51 +907,190 @@ export default function OnboardingPage() {
               </div>
 
               <div>
-                <label className="text-xs font-semibold text-muted-foreground uppercase tracking-wider block mb-1.5">
-                  Primary Specialty
-                </label>
+                <label className="text-xs font-semibold text-foreground block mb-1">Primary Specialty</label>
                 <select
+                  required
                   value={selectedSpecialty}
                   onChange={(e) => setSelectedSpecialty(e.target.value)}
-                  className="w-full px-4 py-3 border border-border rounded-xl text-sm focus:outline-none focus:border-copper/50 bg-white"
+                  className="w-full px-4 py-2.5 border border-border rounded-xl text-sm focus:outline-none focus:border-herb-green/50 bg-white"
                 >
-                  <option value="">Select specialty</option>
-                  {AYUSH_SPECIALTIES.map((s) => <option key={s}>{s}</option>)}
+                  <option value="">Select Specialty</option>
+                  {AYUSH_SPECIALTIES.map((s) => (
+                    <option key={s} value={s}>{s}</option>
+                  ))}
                 </select>
               </div>
 
               <div>
-                <label className="text-xs font-semibold text-muted-foreground uppercase tracking-wider block mb-1.5">
-                  Clinic / Hospital Name (optional)
+                <label className="text-xs font-semibold text-foreground block mb-1.5">Languages Spoken</label>
+                <div className="flex flex-wrap gap-1.5">
+                  {LANGUAGES.map((l) => (
+                    <button
+                      key={l}
+                      onClick={() => toggleLanguage(l)}
+                      className={cn(
+                        "text-xs px-3 py-1.5 rounded-full border transition-all font-medium",
+                        selectedLanguages.includes(l)
+                          ? "bg-herb-green text-white border-herb-green"
+                          : "border-border text-muted-foreground hover:border-herb-green/40 bg-white"
+                      )}
+                    >
+                      {l}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            </div>
+
+            <button
+              onClick={() => setStep("doctor-documents")}
+              disabled={!fullName || !phone || !dob || !gender || !consultationFee || !selectedSpecialty || selectedLanguages.length === 0}
+              className={cn(
+                "w-full py-3.5 mt-6 bg-herb-green text-white rounded-xl text-sm font-semibold transition-all shadow-md",
+                !fullName || !phone || !dob || !gender || !consultationFee || !selectedSpecialty || selectedLanguages.length === 0
+                  ? "opacity-60 cursor-not-allowed"
+                  : "hover:bg-herb-green/90 active:scale-98"
+              )}
+            >
+              Continue to Document Uploads
+            </button>
+          </div>
+        )}
+
+        {/* ── Doctor Document Uploads ── */}
+        {step === "doctor-documents" && (
+          <div>
+            <h2 className="font-display text-2xl font-bold text-foreground mb-1">Upload Credentials</h2>
+            <p className="text-sm text-muted-foreground mb-6 font-medium">Verify credentials for medical registration</p>
+
+            <div className="space-y-4 max-h-[60vh] overflow-y-auto pr-1 pb-4">
+              {/* Degree Cert */}
+              <div className="border border-dashed border-border rounded-2xl p-4 bg-white hover:border-herb-green/50 transition-all">
+                <label className="flex flex-col items-center justify-center cursor-pointer gap-2">
+                  <Award size={28} className="text-muted-foreground" />
+                  <span className="text-xs font-bold text-foreground">BAMS / AYUSH Degree Certificate (PDF/Image) *</span>
+                  <input
+                    required
+                    type="file"
+                    accept="image/*,application/pdf"
+                    onChange={(e) => setDegreeFile(e.target.files?.[0] || null)}
+                    className="hidden"
+                  />
+                  {degreeFile ? (
+                    <span className="text-xs text-herb-green font-semibold bg-herb-green/10 px-2 py-0.5 rounded-full">
+                      ✓ {degreeFile.name}
+                    </span>
+                  ) : (
+                    <span className="text-[10px] text-muted-foreground">Click to upload document</span>
+                  )}
                 </label>
-                <input
-                  type="text"
-                  value={clinicName}
-                  onChange={(e) => setClinicName(e.target.value)}
-                  placeholder="e.g. Holistic Wellness Clinic"
-                  className="w-full px-4 py-3 border border-border rounded-xl text-sm focus:outline-none focus:border-copper/50 focus:ring-2 focus:ring-copper/10"
-                />
+              </div>
+
+              {/* State registration certificate */}
+              <div className="border border-dashed border-border rounded-2xl p-4 bg-white hover:border-herb-green/50 transition-all">
+                <label className="flex flex-col items-center justify-center cursor-pointer gap-2">
+                  <FileText size={28} className="text-muted-foreground" />
+                  <span className="text-xs font-bold text-foreground">State Council Registration Certificate (PDF/Image) *</span>
+                  <input
+                    required
+                    type="file"
+                    accept="image/*,application/pdf"
+                    onChange={(e) => setRegistrationCertFile(e.target.files?.[0] || null)}
+                    className="hidden"
+                  />
+                  {registrationCertFile ? (
+                    <span className="text-xs text-herb-green font-semibold bg-herb-green/10 px-2 py-0.5 rounded-full">
+                      ✓ {registrationCertFile.name}
+                    </span>
+                  ) : (
+                    <span className="text-[10px] text-muted-foreground">Click to upload document</span>
+                  )}
+                </label>
+              </div>
+
+              {/* Profile Photo */}
+              <div className="border border-dashed border-border rounded-2xl p-4 bg-white hover:border-herb-green/50 transition-all">
+                <label className="flex flex-col items-center justify-center cursor-pointer gap-2">
+                  <User size={28} className="text-muted-foreground" />
+                  <span className="text-xs font-bold text-foreground">Profile Photo (Image)</span>
+                  <input
+                    type="file"
+                    accept="image/*"
+                    onChange={(e) => setPhotoFile(e.target.files?.[0] || null)}
+                    className="hidden"
+                  />
+                  {photoFile ? (
+                    <span className="text-xs text-herb-green font-semibold bg-herb-green/10 px-2 py-0.5 rounded-full">
+                      ✓ {photoFile.name}
+                    </span>
+                  ) : (
+                    <span className="text-[10px] text-muted-foreground">Click to upload image</span>
+                  )}
+                </label>
+              </div>
+
+              {/* Doctor Signature */}
+              <div className="border border-dashed border-border rounded-2xl p-4 bg-white hover:border-herb-green/50 transition-all">
+                <label className="flex flex-col items-center justify-center cursor-pointer gap-2">
+                  <Upload size={28} className="text-muted-foreground" />
+                  <span className="text-xs font-bold text-foreground">Doctor Signature (Image)</span>
+                  <input
+                    type="file"
+                    accept="image/*"
+                    onChange={(e) => setSignatureFile(e.target.files?.[0] || null)}
+                    className="hidden"
+                  />
+                  {signatureFile ? (
+                    <span className="text-xs text-herb-green font-semibold bg-herb-green/10 px-2 py-0.5 rounded-full">
+                      ✓ {signatureFile.name}
+                    </span>
+                  ) : (
+                    <span className="text-[10px] text-muted-foreground">Click to upload image</span>
+                  )}
+                </label>
               </div>
             </div>
 
             {error && (
-              <div className="bg-red-50 border border-red-200 rounded-xl px-3.5 py-2.5 text-sm text-red-700 mb-4">
-                {error}
+              <div className="bg-red-50 border border-red-200 rounded-xl px-3.5 py-2.5 text-sm text-red-700 mt-4 flex items-start gap-2">
+                <AlertCircle size={16} className="mt-0.5" />
+                <span>{error}</span>
               </div>
             )}
+
             <button
-              onClick={finishPractitioner}
-              disabled={!fullName || !gender || loading}
-              className={cn("w-full py-3.5 bg-copper text-white rounded-xl text-sm font-semibold transition-all shadow-md",
-                (!fullName || !gender || loading) ? "opacity-60 cursor-not-allowed" : "hover:bg-copper/90")}
+              onClick={finishDoctor}
+              disabled={!degreeFile || !registrationCertFile || loading}
+              className={cn(
+                "w-full py-3.5 mt-6 bg-herb-green text-white rounded-xl text-sm font-semibold transition-all shadow-md",
+                !degreeFile || !registrationCertFile || loading
+                  ? "opacity-60 cursor-not-allowed"
+                  : "hover:bg-herb-green/90 active:scale-98"
+              )}
             >
-              {loading ? "Creating account..." : "Set Up My Practice ✨"}
+              {loading ? "Uploading & Submitting..." : "Submit Profile for Review ✨"}
             </button>
+          </div>
+        )}
+
+        {/* ── Success screen ── */}
+        {step === "success" && (
+          <div className="text-center py-8">
+            <div className="w-16 h-16 bg-herb-green/10 rounded-full flex items-center justify-center mx-auto mb-6">
+              <CheckCircle size={36} className="text-herb-green" />
+            </div>
+            <h2 className="font-display text-3xl font-bold text-foreground">Submitted Successfully!</h2>
+            <p className="text-sm text-muted-foreground mt-3 max-w-sm mx-auto leading-relaxed">
+              Your profile documents have been uploaded securely. Our administrative team will review your qualifications and credentials.
+            </p>
+            <p className="text-xs text-amber-600 bg-amber-50 rounded-xl px-4 py-2 mt-4 inline-block border border-amber-100 font-medium">
+              We&apos;ll notify you by email once your verification status is updated.
+            </p>
             <button
-              onClick={finishPractitioner}
-              className="w-full py-2.5 mt-2 border border-border text-sm font-medium rounded-xl text-muted-foreground hover:bg-muted transition-colors"
+              onClick={() => router.push("/")}
+              className="mt-8 w-full py-3.5 bg-herb-green text-white rounded-xl text-sm font-semibold hover:bg-herb-green/90 shadow-md transition-all"
             >
-              Skip — I&apos;ll fill this in later
+              Return to Home
             </button>
           </div>
         )}

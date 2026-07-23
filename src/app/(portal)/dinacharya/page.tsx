@@ -4,8 +4,7 @@ import { useState, useEffect } from "react";
 import { Progress } from "@/components/ui/progress";
 import { cn } from "@/lib/utils";
 import { useAuth } from "@/contexts/auth-context";
-import { useDinacharyaTasks } from "@/lib/hooks";
-import { toggleDinacharyaTask } from "@/lib/queries";
+import { useDinacharyaTasks, toggleDinacharyaTaskApi } from "@/hooks/use-dinacharya";
 import type { DinacharTask } from "@/lib/types";
 
 type TimeBlock = "morning" | "midday" | "evening" | "night";
@@ -52,7 +51,7 @@ export default function DinacharyaPage() {
       prev.map((t) => {
         if (t.id === id) {
           const newDone = !t.done;
-          toggleDinacharyaTask(id, newDone);
+          toggleDinacharyaTaskApi(id, newDone);
           return { ...t, done: newDone };
         }
         return t;

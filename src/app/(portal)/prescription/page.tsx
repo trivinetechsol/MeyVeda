@@ -3,8 +3,9 @@
 import { useState, useEffect } from "react";
 import Link from "next/link";
 import { useAuth } from "@/contexts/auth-context";
-import { usePatientPrescriptions } from "@/lib/hooks";
+import { usePatientPrescriptions } from "@/hooks/use-prescriptions";
 import { cn } from "@/lib/utils";
+import { Clock } from "lucide-react";
 
 const getMedicineIcon = (name: string) => {
   const n = name.toLowerCase();
@@ -204,8 +205,36 @@ export default function PrescriptionPage() {
                     if (rx.dietaryAdvice) {
                       lifestyle.push({ icon: "🥗", title: "Dietary Advice", desc: rx.dietaryAdvice });
                     }
+                    let upcomingCall = null;
+                    let cleanLifestyle = rx.lifestyleAdvice;
+
                     if (rx.lifestyleAdvice) {
-                      lifestyle.push({ icon: "🌅", title: "Lifestyle Advice", desc: rx.lifestyleAdvice });
+                      const match = rx.lifestyleAdvice.match(/\[Upcoming Session Fixed: (.*?) at (.*?)\]/);
+                      if (match) {
+                        const date = match[1];
+                        const time = match[2];
+                        let displayTime = time;
+                        try {
+                          if (!time.includes("AM") && !time.includes("PM")) {
+                            const [h, m] = time.split(":");
+                            const hours = parseInt(h, 10);
+                            const period = hours >= 12 ? "PM" : "AM";
+                            const h12 = hours % 12 || 12;
+                            displayTime = `${h12}:${m} ${period}`;
+                          }
+                        } catch (e) {}
+
+                        let displayDate = date;
+                        try {
+                          displayDate = new Date(date).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' });
+                        } catch (e) {}
+
+                        upcomingCall = `${displayDate} at ${displayTime}`;
+                        cleanLifestyle = rx.lifestyleAdvice.replace(match[0], '').trim();
+                      }
+                      if (cleanLifestyle) {
+                        lifestyle.push({ icon: "🌅", title: "Lifestyle Advice", desc: cleanLifestyle });
+                      }
                     }
                     if (rx.physicalActivity) {
                       lifestyle.push({ icon: "🧘", title: "Physical Activity", desc: rx.physicalActivity });
@@ -290,10 +319,21 @@ export default function PrescriptionPage() {
                                       <span className="text-base flex-shrink-0">{l.icon}</span>
                                       <div>
                                         <p className="text-xs font-semibold text-foreground">{l.title}</p>
-                                        <p className="text-[10px] text-muted-foreground mt-0.5 leading-relaxed">{l.desc}</p>
+                                        <p className="text-[10px] text-muted-foreground mt-0.5 leading-relaxed whitespace-pre-line">{l.desc}</p>
                                       </div>
                                     </div>
                                   ))}
+                                  {upcomingCall && (
+                                    <div className="flex items-center justify-between p-3 bg-[#f0fdf4] border border-[#bbf7d0] rounded-xl sm:col-span-2">
+                                      <div>
+                                        <p className="text-[10px] font-bold text-emerald-600 uppercase tracking-wider mb-1">Upcoming Session Booked</p>
+                                        <p className="text-xs font-bold text-emerald-800">{upcomingCall}</p>
+                                      </div>
+                                      <div className="w-8 h-8 rounded-full bg-emerald-100/50 flex items-center justify-center">
+                                        <Clock className="w-4 h-4 text-emerald-500" />
+                                      </div>
+                                    </div>
+                                  )}
                                 </div>
                               </div>
                             )}

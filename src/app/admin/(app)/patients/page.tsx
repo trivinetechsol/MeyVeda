@@ -2,8 +2,7 @@
 
 import { useState } from "react";
 import { cn } from "@/lib/utils";
-import { useAdminPatients } from "@/lib/hooks";
-import { togglePatientStatus, createPatient } from "@/lib/queries";
+import { useAdminPatients, togglePatientStatusApi, createPatientApi } from "@/hooks/use-admin";
 
 type PatientStatus = "active" | "suspended";
 
@@ -95,7 +94,7 @@ export default function AdminPatientsPage() {
 
   async function toggleStatus(id: string, currentIsActive: boolean) {
     try {
-      await togglePatientStatus(id, !currentIsActive);
+      await togglePatientStatusApi(id, !currentIsActive);
       refetch();
       setSelected(null);
     } catch (err: any) {
@@ -107,7 +106,7 @@ export default function AdminPatientsPage() {
     e.preventDefault();
     setSaving(true);
     try {
-      await createPatient({
+      await createPatientApi({
         name: form.name,
         phone: form.phone,
         email: form.email,

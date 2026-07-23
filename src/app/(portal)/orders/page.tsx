@@ -4,8 +4,7 @@ import { useState, useEffect } from "react";
 import Link from "next/link";
 import { cn } from "@/lib/utils";
 import { useAuth } from "@/contexts/auth-context";
-import { useOrders } from "@/lib/hooks";
-import type { Order } from "@/lib/queries";
+import { useOrders, type Order } from "@/hooks/use-order";
 
 type OrderStatus = "placed" | "prescription_verified" | "packed" | "dispatched" | "out_for_delivery" | "delivered" | "cancelled" | "refund_initiated" | "refunded";
 
@@ -56,7 +55,7 @@ export default function OrdersPage() {
 
   const [tab, setTab] = useState<TabFilter>("active");
 
-  const { data: orders, loading } = useOrders(user?.phone);
+  const { data: orders, loading } = useOrders(user?.id);
   const allOrders = orders ?? [];
 
   const [selectedId, setSelectedId] = useState<string>("");

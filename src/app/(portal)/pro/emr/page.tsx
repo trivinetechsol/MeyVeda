@@ -5,7 +5,7 @@ import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 import { cn } from "@/lib/utils";
 
-type SOAPTab = "S" | "O" | "A" | "P";
+type ClinicalTab = "rogi" | "ashtavidha" | "vinischaya" | "chikitsa";
 
 const HERB_SUGGESTIONS = [
   { name: "Ashwagandha", latin: "Withania somnifera", dosha: "Vata" },
@@ -20,23 +20,34 @@ const FREQ_OPTIONS = ["Once daily", "Twice daily", "Thrice daily", "At bedtime",
 
 const PATIENT_PROBLEMS: Record<string, { id: string; code: string; name: string; description: string; severity: "mild" | "moderate" | "severe"; since: string; status: "active" | "controlled" | "resolved" }[]> = {
   p1: [
-    { id: "pr1", code: "GRH-V",  name: "Vataja Grahani",  description: "IBS — Vata dominant, chronic digestive weakness", severity: "moderate", since: "Feb 2026", status: "active"     },
-    { id: "pr2", code: "ANX-01", name: "Anxiety / Stress", description: "Stress-induced anxiety, sleep disruption",         severity: "mild",     since: "May 2026", status: "active"     },
+    { id: "pr1", code: "GRH-V",  name: "Vataja Grahani",    description: "Grahani Roga — Vata dominant, chronic Agni weakness",   severity: "moderate", since: "Feb 2026", status: "active"     },
+    { id: "pr2", code: "CIT-01", name: "Chittodvega",        description: "Manasika Roga — stress-induced restlessness, Nidra Nasha (insomnia)", severity: "mild", since: "May 2026", status: "active" },
   ],
   p2: [
-    { id: "pr3", code: "SNV-01", name: "Sandhivata",    description: "Bilateral knee osteoarthritis",              severity: "moderate", since: "Mar 2026", status: "active"     },
-    { id: "pr4", code: "STH-01", name: "Sthaulya",      description: "Obesity — BMI 30.1",                         severity: "moderate", since: "Jan 2026", status: "active"     },
-    { id: "pr5", code: "HTN-01", name: "Hypertension",  description: "Controlled — on Amlodipine 5mg",             severity: "mild",     since: "2020",     status: "controlled" },
+    { id: "pr3", code: "SNV-01", name: "Sandhivata",         description: "Vata-Kshaya in Sandhi (joints) — bilateral knee involvement", severity: "moderate", since: "Mar 2026", status: "active"     },
+    { id: "pr4", code: "STH-01", name: "Sthaulya",           description: "Medoroga (obesity) — BMI 30.1, Kapha-Meda Vriddhi",    severity: "moderate", since: "Jan 2026", status: "active"     },
+    { id: "pr5", code: "RKT-01", name: "Raktachapa Vriddi",  description: "Uccha Raktachapa — controlled with integrative approach", severity: "mild", since: "2020", status: "controlled" },
   ],
   p3: [
-    { id: "pr6", code: "KSH-01", name: "Kushtaroga",    description: "Recurrent plaque psoriasis — scalp + elbows", severity: "moderate", since: "2025", status: "active"     },
-    { id: "pr7", code: "MDO-01", name: "Medovriddhi",   description: "Dyslipidemia — elevated LDL",                 severity: "mild",     since: "2018", status: "controlled" },
-    { id: "pr8", code: "DM-02",  name: "Prameha (DM2)", description: "Diet-controlled, HbA1c 6.8%",                severity: "moderate", since: "2018", status: "controlled" },
-    { id: "pr9", code: "HTN-01", name: "Hypertension",  description: "Controlled — Telmisartan 40mg",               severity: "mild",     since: "2016", status: "controlled" },
+    { id: "pr6", code: "KSH-01", name: "Kushtha Roga",       description: "Kitibha Kushtha (psoriasis) — scalp + elbows, Vata-Kapha dominant", severity: "moderate", since: "2025", status: "active" },
+    { id: "pr7", code: "MDO-01", name: "Medovriddhi",        description: "Dhamanipratichaya (dyslipidemia) — elevated Meda Dhatu", severity: "mild", since: "2018", status: "controlled" },
+    { id: "pr8", code: "PRM-02", name: "Prameha (Madhumeha)", description: "Madhumeha (Type 2 DM) — Pathya-controlled, HbA1c 6.8%", severity: "moderate", since: "2018", status: "controlled" },
+    { id: "pr9", code: "RKT-02", name: "Raktachapa Vriddi",  description: "Uccha Raktachapa — Telmisartan 40mg (integrative)", severity: "mild", since: "2016", status: "controlled" },
   ],
 };
 
-const COMMON_TESTS = [
+const AYURVEDIC_ASSESSMENTS = [
+  { id: "prakriti",  name: "Prakriti Pariksha",  full: "Constitutional Assessment (Vata/Pitta/Kapha)" },
+  { id: "nadi",      name: "Nadi Pariksha",      full: "Pulse Diagnosis — 3-Dosha Pattern Analysis" },
+  { id: "agni",      name: "Agni Pariksha",       full: "Digestive Fire Assessment (Sama/Vishama/Teekshna/Manda)" },
+  { id: "ama",       name: "Ama Pariksha",        full: "Toxin / Metabolic Waste Assessment" },
+  { id: "mala",      name: "Mala Pariksha",       full: "Stool Analysis (Traditional)" },
+  { id: "mutra",     name: "Mutra Pariksha",      full: "Urine Analysis (Tailabindu Method)" },
+  { id: "jihva",     name: "Jihva Pariksha",      full: "Tongue Coating & Colour Mapping" },
+  { id: "sara",      name: "Sara Pariksha",       full: "Tissue Quality (Dhatu Sara) Evaluation" },
+];
+
+const MODERN_INVESTIGATIONS = [
   { id: "cbc",     name: "CBC",         full: "Complete Blood Count" },
   { id: "lft",     name: "LFT",         full: "Liver Function Tests" },
   { id: "kft",     name: "KFT",         full: "Kidney Function Tests" },
@@ -48,25 +59,29 @@ const COMMON_TESTS = [
   { id: "b12",     name: "Vit B12",     full: "Vitamin B12 Level" },
   { id: "urine",   name: "Urine R/M",   full: "Urine Routine & Microscopy" },
   { id: "esr",     name: "ESR + CRP",   full: "Inflammatory Markers" },
-  { id: "prakriti",name: "Prakriti",    full: "Prakriti Assessment Chart" },
 ];
+
+const COMMON_TESTS = [...AYURVEDIC_ASSESSMENTS, ...MODERN_INVESTIGATIONS];
 
 const REFERRAL_SPECIALTIES = [
-  "Cardiology", "Orthopedics", "Dermatology", "Gastroenterology",
-  "Endocrinology", "Neurology", "Psychiatry / Psychology",
-  "Panchakarma Specialist", "Naturopathy", "Homeopathy",
-  "General Medicine", "General Surgery", "Gynaecology",
+  "Kayachikitsa (Internal Medicine)", "Shalya Tantra (Surgical)",
+  "Shalakya Tantra (ENT & Eye)", "Kaumarabhritya (Paediatrics & OB-GYN)",
+  "Agada Tantra (Toxicology)", "Rasayana (Rejuvenation)",
+  "Vajikarana (Reproductive Health)", "Panchakarma Specialist",
+  "Yoga Therapy", "Naturopathy", "Siddha Maruthuvam",
+  "Unani Ilaj", "Homeopathy",
 ];
 
-const ROS_SYSTEMS = [
-  { system: "Constitutional",   symptoms: ["Fever", "Fatigue", "Weight loss", "Night sweats", "Poor appetite"] },
-  { system: "Cardiovascular",   symptoms: ["Chest pain", "Palpitations", "Breathlessness on exertion", "Ankle swelling"] },
-  { system: "Respiratory",      symptoms: ["Cough", "Wheezing", "Haemoptysis", "Shortness of breath at rest"] },
-  { system: "Gastrointestinal", symptoms: ["Nausea / vomiting", "Abdominal pain", "Bloating", "Constipation", "Diarrhoea", "Blood in stool"] },
-  { system: "Musculoskeletal",  symptoms: ["Joint pain", "Joint swelling", "Morning stiffness", "Muscle weakness"] },
-  { system: "Neurological",     symptoms: ["Headache", "Dizziness / vertigo", "Numbness / tingling", "Memory issues"] },
-  { system: "Skin",             symptoms: ["Rash", "Itching / pruritus", "Hair loss", "Skin discolouration"] },
-  { system: "Genitourinary",    symptoms: ["Burning micturition", "Increased frequency", "Nocturia", "Haematuria"] },
+const SROTAS_SYSTEMS = [
+  { system: "Pranavaha Srotas (Breath/Prana)",       symptoms: ["Shwasa (Dyspnoea)", "Kasa (Cough)", "Hikka (Hiccups)", "Chest tightness", "Wheezing"] },
+  { system: "Annavaha Srotas (Digestion)",           symptoms: ["Agnimandya (Poor appetite)", "Ajirna (Indigestion)", "Chardi (Vomiting)", "Udara Shoola (Abdominal pain)", "Vibandha (Constipation)", "Atisara (Diarrhoea)"] },
+  { system: "Rasavaha Srotas (Plasma/Lymph)",        symptoms: ["Jwara (Fever)", "Aruchi (Tastelessness)", "Angamarda (Body ache)", "Tandra (Drowsiness)", "Gaurava (Heaviness)"] },
+  { system: "Raktavaha Srotas (Blood)",              symptoms: ["Raktapitta (Bleeding)", "Kushtha (Skin disease)", "Visarpa (Erysipelas)", "Vidradhi (Abscess)", "Netra/Mukha Raga (Redness)"] },
+  { system: "Mamsavaha Srotas (Muscle)",             symptoms: ["Granthi (Tumour/Lump)", "Adhimamsa (Overgrowth)", "Muscle weakness", "Muscle wasting"] },
+  { system: "Asthivaha Srotas (Bone/Joint)",         symptoms: ["Sandhi Shoola (Joint pain)", "Sandhi Shotha (Swelling)", "Asthi Bheda (Bone pain)", "Morning stiffness", "Nakha/Kesha Dosha (Nail/Hair issues)"] },
+  { system: "Majjavaha Srotas (Nerve/Marrow)",       symptoms: ["Shirahshoola (Headache)", "Bhrama (Dizziness)", "Supti (Numbness)", "Smriti Bhramsha (Memory issues)", "Murchha (Fainting)"] },
+  { system: "Mutravaha Srotas (Urinary)",            symptoms: ["Mutra Krichra (Dysuria)", "Prameha (Polyuria)", "Mutra Rakta (Haematuria)", "Nocturia"] },
+  { system: "Svedavaha Srotas (Skin/Sweat)",         symptoms: ["Kandu (Itching)", "Vaivarnya (Discolouration)", "Khalitya (Hair loss)", "Pidaka (Eruptions)", "Ati Sveda / A-sveda (Excess/No sweating)"] },
 ];
 
 function EMRContent() {
@@ -117,7 +132,7 @@ function EMRContent() {
   }
   const statusStyle = { normal: "bg-herb-green/10 text-herb-green border-herb-green/20", warning: "bg-amber-50 text-amber-700 border-amber-200", alert: "bg-red-50 text-red-600 border-red-200" };
 
-  const [activeTab, setActiveTab] = useState<SOAPTab>("S");
+  const [activeTab, setActiveTab] = useState<ClinicalTab>("rogi");
   const [herbSearch, setHerbSearch] = useState("");
   const [showHerbSuggestions, setShowHerbSuggestions] = useState(false);
   const [selectedHerbs, setSelectedHerbs] = useState<typeof HERB_SUGGESTIONS>([]);
@@ -125,7 +140,7 @@ function EMRContent() {
   const initialS = walkInComplaint
     ? `Chief complaint: ${walkInComplaint}${walkInDuration ? `\nDuration: ${walkInDuration}` : ""}${walkInAllergies ? `\nAllergies: ${walkInAllergies}` : ""}`
     : "";
-  const [notes, setNotes] = useState({ S: initialS, O: "", A: "", P: "" });
+  const [notes, setNotes] = useState({ rogi: initialS, ashtavidha: "", vinischaya: "", chikitsa: "" });
   const [signed, setSigned] = useState(false);
   const [followUpDate, setFollowUpDate] = useState("");
   const [followUpNote, setFollowUpNote] = useState("");
@@ -455,15 +470,23 @@ function EMRContent() {
             )}
           </div>
 
-          {/* AYUSH Assessment */}
+          {/* Ashtavidha Pariksha — 8-Fold Clinical Examination */}
           <div className="bg-white rounded-2xl border border-border p-5">
-            <h3 className="font-semibold text-foreground text-sm mb-4">AYUSH Assessment</h3>
+            <div className="flex items-center gap-2 mb-1">
+              <h3 className="font-semibold text-foreground text-sm">Ashtavidha Pariksha</h3>
+              <span className="text-[10px] bg-herb-green/10 text-herb-green font-semibold px-2 py-0.5 rounded-full">8-Fold Exam</span>
+            </div>
+            <p className="text-[10px] text-muted-foreground mb-4">Classical eight-point clinical examination</p>
             <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
               {[
-                { label: "Prakriti", options: ["Vata", "Pitta", "Kapha", "Vata-Pitta", "Pitta-Kapha"] },
-                { label: "Nadi", options: ["Vata", "Pitta", "Kapha", "Mixed"] },
-                { label: "Jihva", options: ["Clean", "Mild coating", "Heavy coating"] },
-                { label: "Agni", options: ["Sama", "Vishama", "Teekshna", "Manda"] },
+                { label: "Nadi (Pulse)", options: ["—", "Vata (Snake-like)", "Pitta (Frog-like)", "Kapha (Swan-like)", "Vata-Pitta", "Pitta-Kapha", "Vata-Kapha", "Sannipata"] },
+                { label: "Mutra (Urine)", options: ["—", "Clear / Pale", "Yellowish", "Dark / Concentrated", "Frothy", "Scanty", "Excessive"] },
+                { label: "Mala (Stool)", options: ["—", "Sama (Normal)", "Dry / Hard", "Loose / Watery", "Sticky / Ama-laden", "Foul-smelling", "Irregular"] },
+                { label: "Jihva (Tongue)", options: ["—", "Clean / Pink", "White coating", "Yellow coating", "Thick Ama coating", "Dry / Cracked", "Pale", "Red / Inflamed"] },
+                { label: "Shabda (Voice)", options: ["—", "Clear / Normal", "Hoarse (Vata)", "Sharp / Loud (Pitta)", "Heavy / Deep (Kapha)", "Weak / Low"] },
+                { label: "Sparsha (Skin)", options: ["—", "Normal", "Dry / Rough (Vata)", "Warm / Oily (Pitta)", "Cold / Damp (Kapha)", "Tender", "Oedematous"] },
+                { label: "Drik (Eyes)", options: ["—", "Clear / Bright", "Dry / Dull (Vata)", "Red / Inflamed (Pitta)", "Watery / Heavy (Kapha)", "Yellowish (Pitta)", "Pale"] },
+                { label: "Akriti (Build)", options: ["—", "Lean / Thin (Vata)", "Medium / Muscular (Pitta)", "Heavy / Stout (Kapha)", "Emaciated", "Obese"] },
               ].map((field) => (
                 <div key={field.label}>
                   <label className="block text-[10px] font-medium text-muted-foreground mb-1 uppercase tracking-wider">
@@ -477,25 +500,54 @@ function EMRContent() {
                 </div>
               ))}
             </div>
+            {/* Additional Ayurvedic Assessments */}
+            <div className="mt-4 pt-4 border-t border-border">
+              <p className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground mb-3">Dosha & Agni Assessment</p>
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+                {[
+                  { label: "Prakriti", options: ["—", "Vata", "Pitta", "Kapha", "Vata-Pitta", "Vata-Kapha", "Pitta-Kapha", "Tridoshaja"] },
+                  { label: "Vikriti (Current)", options: ["—", "Vata ↑", "Pitta ↑", "Kapha ↑", "Vata-Pitta ↑", "Pitta-Kapha ↑", "Vata-Kapha ↑", "Sannipata"] },
+                  { label: "Agni (Digestive Fire)", options: ["—", "Sama (Balanced)", "Vishama (Irregular — Vata)", "Teekshna (Sharp — Pitta)", "Manda (Sluggish — Kapha)"] },
+                  { label: "Ama (Toxin Level)", options: ["—", "Nirama (No Ama)", "Mild Ama", "Moderate Ama", "Sama (Heavy Ama)"] },
+                  { label: "Ojas (Vitality)", options: ["—", "Strong (Para)", "Moderate", "Depleted (Ojo-Kshaya)"] },
+                  { label: "Koshtha (Bowel)", options: ["—", "Krura (Hard — Vata)", "Mridu (Soft — Pitta)", "Madhyama (Moderate — Kapha)"] },
+                  { label: "Satva (Mental)", options: ["—", "Pravara (Strong)", "Madhyama (Moderate)", "Avara (Weak)"] },
+                  { label: "Sara (Tissue Quality)", options: ["—", "Rasa Sara", "Rakta Sara", "Mamsa Sara", "Meda Sara", "Asthi Sara", "Majja Sara", "Shukra Sara"] },
+                ].map((field) => (
+                  <div key={field.label}>
+                    <label className="block text-[10px] font-medium text-muted-foreground mb-1 uppercase tracking-wider">
+                      {field.label}
+                    </label>
+                    <select className="w-full text-xs border border-border rounded-lg px-2.5 py-2 focus:outline-none focus:border-herb-green/50 bg-white">
+                      {field.options.map((o) => (
+                        <option key={o}>{o}</option>
+                      ))}
+                    </select>
+                  </div>
+                ))}
+              </div>
+            </div>
           </div>
 
-          {/* SOAP Tabs */}
+          {/* Clinical Notes — Ayurvedic Framework */}
           <div className="bg-white rounded-2xl border border-border p-5">
             <div className="flex gap-1 mb-4 bg-muted rounded-xl p-1">
-              {(["S", "O", "A", "P"] as SOAPTab[]).map((tab) => (
+              {([
+                { id: "rogi" as ClinicalTab, label: "Rogi Pariksha", short: "Patient Exam" },
+                { id: "ashtavidha" as ClinicalTab, label: "Ashtavidha", short: "8-Fold Findings" },
+                { id: "vinischaya" as ClinicalTab, label: "Roga Vinischaya", short: "Diagnosis" },
+                { id: "chikitsa" as ClinicalTab, label: "Chikitsa Yoga", short: "Treatment" },
+              ]).map((tab) => (
                 <button
-                  key={tab}
-                  onClick={() => setActiveTab(tab)}
+                  key={tab.id}
+                  onClick={() => setActiveTab(tab.id)}
                   className={cn(
                     "flex-1 py-2 text-xs font-semibold rounded-lg transition-all",
-                    activeTab === tab ? "bg-white text-foreground shadow-sm" : "text-muted-foreground hover:text-foreground"
+                    activeTab === tab.id ? "bg-white text-foreground shadow-sm" : "text-muted-foreground hover:text-foreground"
                   )}
                 >
-                  {tab} — {
-                    tab === "S" ? "Subjective" :
-                    tab === "O" ? "Objective" :
-                    tab === "A" ? "Assessment" : "Plan"
-                  }
+                  <span className="hidden sm:inline">{tab.label}</span>
+                  <span className="sm:hidden">{tab.short}</span>
                 </button>
               ))}
             </div>
@@ -504,10 +556,10 @@ function EMRContent() {
               value={notes[activeTab]}
               onChange={(e) => setNotes((prev) => ({ ...prev, [activeTab]: e.target.value }))}
               placeholder={
-                activeTab === "S" ? "Patient's chief complaint, history, symptoms…" :
-                activeTab === "O" ? "Pulse (Nadi), tongue (Jihva), clinical findings…" :
-                activeTab === "A" ? "Diagnosis, Dosha analysis, Prakriti assessment…" :
-                "Treatment plan, formulations, Panchakarma, lifestyle…"
+                activeTab === "rogi" ? "Pradhana Vedana (chief complaint), Nidana (causative factors), Purvarupa (prodromal symptoms), Rupa (signs & symptoms), Upashaya (relieving factors)…" :
+                activeTab === "ashtavidha" ? "Nadi (pulse pattern), Mutra (urine), Mala (stool), Jihva (tongue), Shabda (voice), Sparsha (skin/touch), Drik (eyes), Akriti (body build)…" :
+                activeTab === "vinischaya" ? "Dosha analysis (Vata/Pitta/Kapha), Samprapti (pathogenesis), Vyadhi (disease), Prakriti vs Vikriti deviation, Sadhyasadhyata (prognosis)…" :
+                "Shamana (palliative therapy), Shodhana (Panchakarma), Aushadhi (formulations), Pathya-Apathya (diet do's & don'ts), Vihara (lifestyle), Dinacharya (daily routine)…"
               }
               className="w-full text-sm resize-none focus:outline-none placeholder:text-muted-foreground leading-relaxed"
             />
@@ -595,14 +647,15 @@ function EMRContent() {
             )}
           </div>
 
-          {/* Review of Systems */}
+          {/* Srotas Pariksha — Channel-Based Systems Review */}
           <div className="bg-white rounded-2xl border border-border overflow-hidden">
             <button
               className="w-full flex items-center justify-between px-5 py-3.5 hover:bg-background transition-colors"
               onClick={() => setRosOpen(o => !o)}
             >
               <div className="flex items-center gap-2">
-                <h3 className="font-semibold text-foreground text-sm">Review of Systems</h3>
+                <h3 className="font-semibold text-foreground text-sm">Srotas Pariksha</h3>
+                <span className="text-[10px] text-muted-foreground">Channel Systems Review</span>
                 {Object.values(rosChecked).filter(Boolean).length > 0 && (
                   <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-amber-50 text-amber-700 border border-amber-200">
                     {Object.values(rosChecked).filter(Boolean).length} flagged
@@ -616,7 +669,7 @@ function EMRContent() {
             </button>
             {rosOpen && (
               <div className="border-t border-border px-5 py-4 space-y-4">
-                {ROS_SYSTEMS.map(sys => (
+                {SROTAS_SYSTEMS.map(sys => (
                   <div key={sys.system}>
                     <p className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground mb-2">{sys.system}</p>
                     <div className="flex flex-wrap gap-2">
@@ -637,7 +690,7 @@ function EMRContent() {
                 ))}
                 {Object.values(rosChecked).filter(Boolean).length > 0 && (
                   <div className="mt-2 pt-3 border-t border-border">
-                    <p className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider mb-1">Positive findings</p>
+                    <p className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider mb-1">Positive findings (Lakshana)</p>
                     <p className="text-xs text-foreground leading-relaxed">
                       {Object.entries(rosChecked).filter(([,v]) => v).map(([k]) => k.split("::")[1]).join(", ")}
                     </p>
@@ -647,14 +700,14 @@ function EMRContent() {
             )}
           </div>
 
-          {/* Investigation Orders */}
+          {/* Pariksha & Investigation Orders */}
           <div className="bg-white rounded-2xl border border-border overflow-hidden">
             <button
               className="w-full flex items-center justify-between px-5 py-3.5 hover:bg-background transition-colors"
               onClick={() => setOrdersOpen(o => !o)}
             >
               <div className="flex items-center gap-2">
-                <h3 className="font-semibold text-foreground text-sm">Investigation Orders</h3>
+                <h3 className="font-semibold text-foreground text-sm">Pariksha & Investigations</h3>
                 {orderedTests.length > 0 && (
                   <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-herb-green/10 text-herb-green border border-herb-green/20">
                     {orderedTests.length} ordered
@@ -669,9 +722,25 @@ function EMRContent() {
             {ordersOpen && (
               <div className="border-t border-border px-5 py-4 space-y-4">
                 <div>
-                  <p className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground mb-2">Common tests</p>
+                  <p className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground mb-2">Ayurvedic Assessments</p>
+                  <div className="flex flex-wrap gap-2 mb-4">
+                    {AYURVEDIC_ASSESSMENTS.map(t => {
+                      const selected = orderedTests.includes(t.id);
+                      return (
+                        <button key={t.id}
+                          onClick={() => setOrderedTests(prev => selected ? prev.filter(x => x !== t.id) : [...prev, t.id])}
+                          title={t.full}
+                          className={cn("text-xs px-3 py-1.5 rounded-full border transition-all",
+                            selected ? "bg-herb-green text-white border-herb-green" : "bg-herb-green/5 text-herb-green border-herb-green/20 hover:border-herb-green/40"
+                          )}>
+                          {t.name}
+                        </button>
+                      );
+                    })}
+                  </div>
+                  <p className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground mb-2">Modern Investigations</p>
                   <div className="flex flex-wrap gap-2">
-                    {COMMON_TESTS.map(t => {
+                    {MODERN_INVESTIGATIONS.map(t => {
                       const selected = orderedTests.includes(t.id);
                       return (
                         <button key={t.id}

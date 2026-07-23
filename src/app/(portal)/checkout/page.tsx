@@ -5,7 +5,7 @@ import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { cn } from "@/lib/utils";
 import { useAuth } from "@/contexts/auth-context";
-import { placeOrder } from "@/lib/queries";
+import { placeOrderApi } from "@/hooks/use-order";
 
 type Step = "address" | "payment" | "confirmed";
 
@@ -70,8 +70,7 @@ export default function CheckoutPage() {
         unitPricePaise: item.price * 100,
       }));
 
-      const newOrderId = await placeOrder({
-        patientId: user.id,
+      const newOrderIdRes = await placeOrderApi({
         address: {
           fullName: form.fullName,
           phone: form.phone,
@@ -84,6 +83,7 @@ export default function CheckoutPage() {
         items: orderItems,
         shippingFeePaise: shipping * 100,
       });
+      const newOrderId = (newOrderIdRes as any).orderId;
 
       setOrderId(newOrderId);
       // Clear cart

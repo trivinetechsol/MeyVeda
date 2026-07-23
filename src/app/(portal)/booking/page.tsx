@@ -4,10 +4,55 @@ import { Suspense, useState, useEffect } from "react";
 import { useSearchParams } from "next/navigation";
 import Link from "next/link";
 import { HPRBadge } from "@/components/Badges";
-import { usePractitioner, useFamilyMembers } from "@/lib/hooks";
-import { bookAppointment } from "@/lib/queries";
+import { useNewDoctorProfile } from "@/hooks/use-new-doctor";
+import { usePractitioner } from "@/hooks/use-discover";
+import { useFamilyMembers } from "@/hooks/use-family";
+
+async function bookAppointment(params: {
+  userId: string;
+  slotId: string;
+  practitionerId: string;
+  mode: "video" | "clinic";
+  reason: string;
+  date: string;
+  time: string;
+  familyMemberId?: string;
+}): Promise<void> {
+  const response = await fetch("/api/booking", {
+    method: "POST",
+    credentials: "include",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(params),
+  });
+  const result = await response.json();
+  if (!response.ok || !result.success) {
+    throw new Error(result.error || "Failed to book appointment");
+  }
+}
+
+async function bookNewDoctorAppointment(params: {
+  userId: string;
+  doctorProfileId: string;
+  mode: "video" | "clinic";
+  reason: string;
+  date: string;
+  time: string;
+  familyMemberId?: string;
+}): Promise<void> {
+  const response = await fetch("/api/booking/new-doctor", {
+    method: "POST",
+    credentials: "include",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(params),
+  });
+  const result = await response.json();
+  if (!response.ok || !result.success) {
+    throw new Error(result.error || "Failed to book appointment");
+  }
+}
 import { formatCurrency, cn } from "@/lib/utils";
 import { useAuth } from "@/contexts/auth-context";
+import { toast } from "react-hot-toast";
 
 type Step = "configure" | "payment" | "confirmed";
 
@@ -29,8 +74,14 @@ function BookingContent() {
   const slotId = params.get("slotId") ?? "";
   const date = params.get("date") ?? new Date().toISOString().split("T")[0];
   const mode = (params.get("mode") ?? "video") as "video" | "clinic";
+  const availableModesParam = params.get("availableModes") ?? mode;
+  const availableModes = availableModesParam.split(",").filter(Boolean) as ("video" | "clinic")[];
 
-  const doctor = usePractitioner(doctorId).data;
+  // Fetch legacy doctor
+  const legacyDocQuery = usePractitioner(doctorId);
+  // Fetch new doctor profile
+  const newDocQuery = useNewDoctorProfile(doctorId);
+
   const { data: rawFamilyMembers } = useFamilyMembers(user?.id);
   const familyMembers = rawFamilyMembers ?? [];
 
@@ -48,6 +99,21 @@ function BookingContent() {
       setSelectedFamilyMemberId(familyMembers[0].id);
     }
   }, [familyMembers, selectedFamilyMemberId]);
+
+  // Resolve active doctor profile details
+  const doctor = legacyDocQuery.data
+    ? legacyDocQuery.data
+    : newDocQuery.data
+      ? {
+        id: newDocQuery.data.id,
+        name: newDocQuery.data.full_name,
+        specialty: newDocQuery.data.specializations?.[0] || "Ayurveda",
+        hprId: newDocQuery.data.verifications?.[0]?.hpr_id || "HPR-PENDING",
+        fee: Math.round((newDocQuery.data.consultation_fee ?? 0) / 100),
+        avatar: newDocQuery.data.full_name?.split(" ").filter(Boolean).map((n: string) => n[0]).join("").slice(0, 2).toUpperCase() || "DR",
+        isNewDoctor: true,
+      }
+      : null;
 
   if (!doctor) {
     return (
@@ -68,22 +134,60 @@ function BookingContent() {
   const total = doctor.fee + gst + convFee;
 
   async function handlePayNow() {
-    if (!user?.id || !slotId) return;
+    if (!user?.id || !doctor) {
+      toast.error("Please sign in before booking");
+      return;
+    }
+
+    const normalizedReason = reason.trim();
+
+    if (selectedPatient === "family" && !selectedFamilyMemberId) {
+      toast.error("Please select a family member");
+      setStep("configure");
+      return;
+    }
+
     setIsProcessing(true);
+
     try {
-      await bookAppointment({
-        userId: user.id,
-        slotId: slotId,
-        practitionerId: doctorId,
-        mode: consultMode,
-        reason: reason,
-        date: date,
-        time: slot,
-        familyMemberId: selectedPatient === "family" ? (selectedFamilyMemberId || undefined) : undefined,
-      });
+      if ("isNewDoctor" in doctor) {
+        await bookNewDoctorAppointment({
+          userId: user.id,
+          doctorProfileId: doctorId,
+          mode: consultMode,
+          reason: normalizedReason || "No specific reason provided",
+          date,
+          time: slot,
+          familyMemberId:
+            selectedPatient === "family"
+              ? selectedFamilyMemberId ?? undefined
+              : undefined,
+        });
+      } else {
+        await bookAppointment({
+          userId: user.id,
+          slotId,
+          practitionerId: doctorId,
+          mode: consultMode,
+          reason: normalizedReason || "No specific reason provided",
+          date,
+          time: slot,
+          familyMemberId:
+            selectedPatient === "family"
+              ? selectedFamilyMemberId ?? undefined
+              : undefined,
+        });
+      }
+
       setStep("confirmed");
-    } catch (err) {
-      console.error("Booking error:", err);
+    } catch (error) {
+      const message =
+        error instanceof Error
+          ? error.message
+          : "Failed to book appointment";
+
+      console.error("Booking error:", error);
+      toast.error(message);
     } finally {
       setIsProcessing(false);
     }
@@ -199,13 +303,13 @@ function BookingContent() {
                 </div>
               </div>
 
-              {/* Mode */}
+              {/* Mode — only show toggle if practitioner offers BOTH modes */}
               <div className="bg-white rounded-2xl border border-border p-5">
                 <h3 className="font-semibold text-foreground text-sm mb-3">Consultation Mode</h3>
-                <div className="flex rounded-xl border border-border overflow-hidden bg-background">
-                  {(["video", "clinic"] as const)
-                    .filter((m) => doctor.consultModes.includes(m))
-                    .map((m) => (
+                {availableModes.length > 1 ? (
+                  // Both modes available — show toggle
+                  <div className="flex rounded-xl border border-border overflow-hidden bg-background">
+                    {(["video", "clinic"] as const).map((m) => (
                       <button
                         key={m}
                         onClick={() => setConsultMode(m)}
@@ -217,7 +321,23 @@ function BookingContent() {
                         {m === "video" ? "📹 Video Consult" : "🏥 In-Clinic"}
                       </button>
                     ))}
-                </div>
+                  </div>
+                ) : (
+                  // Single mode — display as a read-only badge, no choice needed
+                  <div className="flex items-center gap-3 px-4 py-3 bg-herb-green/5 border border-herb-green/20 rounded-xl">
+                    <span className="text-lg">{availableModes[0] === "video" ? "📹" : "🏥"}</span>
+                    <div>
+                      <p className="text-xs font-bold text-herb-green">
+                        {availableModes[0] === "video" ? "Video Consultation" : "In-Clinic Visit"}
+                      </p>
+                      <p className="text-[11px] text-muted-foreground mt-0.5">
+                        {availableModes[0] === "video"
+                          ? "Join via video call — no travel needed"
+                          : "Visit the clinic in person"}
+                      </p>
+                    </div>
+                  </div>
+                )}
               </div>
 
               {/* Patient */}
@@ -305,19 +425,43 @@ function BookingContent() {
 
               {/* Reason */}
               <div className="bg-white rounded-2xl border border-border p-5">
-                <h3 className="font-semibold text-foreground text-sm mb-3">Chief Complaint</h3>
+                <div className="flex items-center justify-between mb-3">
+                  <h3 className="font-semibold text-foreground text-sm">
+                    Chief Complaint
+                  </h3>
+
+                  <span className="text-xs text-muted-foreground">
+                    Optional
+                  </span>
+                </div>
+
                 <textarea
                   rows={3}
                   value={reason}
                   onChange={(e) => setReason(e.target.value)}
-                  placeholder="Briefly describe your primary concern (optional)…"
+                  placeholder="Briefly describe your reason for the consultation (optional)..."
+                  maxLength={500}
                   className="w-full text-sm resize-none p-3 rounded-xl border border-border focus:outline-none focus:border-herb-green/50 focus:ring-2 focus:ring-herb-green/10 transition-all placeholder:text-muted-foreground"
                 />
               </div>
 
               <button
-                onClick={() => setStep("payment")}
-                disabled={!slotId || (selectedPatient === "family" && familyMembers.length === 0)}
+                onClick={() => {
+                  if (
+                    selectedPatient === "family" &&
+                    !selectedFamilyMemberId
+                  ) {
+                    toast.error("Please select a family member");
+                    return;
+                  }
+
+                  setStep("payment");
+                }}
+                disabled={
+                  (selectedPatient === "family" &&
+                    (!selectedFamilyMemberId ||
+                      familyMembers.length === 0))
+                }
                 className="w-full py-3.5 bg-herb-green text-white rounded-xl text-sm font-semibold hover:bg-herb-green/90 transition-all active:scale-95 shadow-sm disabled:opacity-50 disabled:cursor-not-allowed"
               >
                 Continue to Payment

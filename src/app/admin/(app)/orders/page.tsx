@@ -2,8 +2,7 @@
 
 import { useState } from "react";
 import { cn } from "@/lib/utils";
-import { useAdminOrders } from "@/lib/hooks";
-import { updateOrderStatus } from "@/lib/queries";
+import { useAdminOrders, updateOrderStatusApi as updateOrderStatus } from "@/hooks/use-admin";
 
 type OrderStatus =
   | "placed"

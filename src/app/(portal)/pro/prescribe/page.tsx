@@ -23,7 +23,7 @@ const REGISTRY: RegPatient[] = [
     lastVisit: "05 Jun 2026", conditions: "IBS (Vataja Grahani) · Anxiety",
     problems: [
       { code: "GRH-V",  name: "Vataja Grahani",  status: "active"     },
-      { code: "ANX-01", name: "Anxiety / Stress", status: "active"     },
+      { code: "CIT-01", name: "Chittodvega",      status: "active"     },
     ],
     allergies: "Sulfonamides (moderate), Peanuts (moderate)",
     currentMeds: [
@@ -38,9 +38,9 @@ const REGISTRY: RegPatient[] = [
     abha: "meera@abha", bloodGroup: "A+", prakriti: "Pitta-Kapha",
     lastVisit: "01 Jun 2026", conditions: "Sandhivata (Knee OA) · Hypertension",
     problems: [
-      { code: "SNV-01", name: "Sandhivata",   status: "active"     },
-      { code: "STH-01", name: "Sthaulya",     status: "active"     },
-      { code: "HTN-01", name: "Hypertension", status: "controlled" },
+      { code: "SNV-01", name: "Sandhivata",         status: "active"     },
+      { code: "STH-01", name: "Sthaulya",            status: "active"     },
+      { code: "RKT-01", name: "Raktachapa Vriddi",   status: "controlled" },
     ],
     allergies: "Penicillin (life-threatening), Shellfish (severe)",
     currentMeds: [
@@ -54,9 +54,9 @@ const REGISTRY: RegPatient[] = [
     abha: null, bloodGroup: "O+", prakriti: "Kapha",
     lastVisit: "20 May 2026", conditions: "Psoriasis · DM2 · Hypertension",
     problems: [
-      { code: "KSH-01", name: "Kushtaroga",    status: "active"     },
-      { code: "DM-02",  name: "Prameha (DM2)", status: "controlled" },
-      { code: "HTN-01", name: "Hypertension",  status: "controlled" },
+      { code: "KSH-01", name: "Kushtha Roga",          status: "active"     },
+      { code: "PRM-02", name: "Prameha (Madhumeha)",   status: "controlled" },
+      { code: "RKT-02", name: "Raktachapa Vriddi",     status: "controlled" },
     ],
     allergies: "NSAIDs — Aspirin, Ibuprofen (severe gastric risk), Latex (moderate)",
     currentMeds: [
@@ -195,9 +195,10 @@ const MEDICINE_CATALOGUE: Med[] = [
   { name: "Zinc 25mg",                  system: "OTC"        },
 ];
 
-const FREQ_OPTIONS   = ["Once daily", "Twice daily", "Thrice daily", "Before meals", "After meals", "At bedtime", "As needed"];
-const ANUPANA_OPT    = ["Warm water", "Warm milk", "Honey", "Ghee", "Plain water", "After food"];
-const DURATION_OPT   = ["1 week", "2 weeks", "1 month", "6 weeks", "3 months", "6 months", "Ongoing"];
+const KALPANA_OPT   = ["Churna (Powder)", "Vati (Tablet)", "Kashaya (Decoction)", "Arishta (Fermented)", "Avaleha (Confection)", "Taila (Oil)", "Ghrita (Ghee)", "Bhasma (Ash)", "Guggulu", "Capsule", "Syrup", "Tablet (Modern)"];
+const FREQ_OPTIONS   = ["Pratah (Morning)", "Sayam (Evening)", "Pratah + Sayam (Twice daily)", "Trikala (Thrice daily)", "Pragbhakta (Before food)", "Adhobhakta (After food)", "Nishi (At bedtime)", "Yathakalam (As needed)"];
+const ANUPANA_OPT    = ["Ushna Jala (Warm water)", "Kshira (Warm milk)", "Madhu (Honey)", "Ghrita (Ghee)", "Sheeta Jala (Plain water)", "Adhobhakta (After food)"];
+const DURATION_OPT   = ["1 Saptaha (1 week)", "2 Saptaha (2 weeks)", "1 Masa (1 month)", "Ardha Masa (6 weeks)", "3 Masa (3 months)", "6 Masa (6 months)", "Nityam (Ongoing)"];
 
 // ─── Prescription row type ────────────────────────────────────────────────────
 
@@ -497,7 +498,7 @@ export default function PrescribePage() {
 
             {/* Diagnosis */}
             <div className="bg-white rounded-2xl border border-border p-5">
-              <label className="text-xs font-bold uppercase tracking-wider text-muted-foreground block mb-2">Diagnosis / Indication</label>
+              <label className="text-xs font-bold uppercase tracking-wider text-muted-foreground block mb-2">Roga Vinischaya (Diagnosis)</label>
               <input type="text" value={diagnosis} onChange={e => setDiagnosis(e.target.value)}
                 placeholder="e.g. Vataja Grahani — follow-up, dose escalation"
                 className="w-full px-3.5 py-2.5 text-sm border border-border rounded-xl focus:outline-none focus:ring-2 focus:ring-herb-green/20 focus:border-herb-green/50" />
@@ -507,7 +508,7 @@ export default function PrescribePage() {
             <div className="bg-white rounded-2xl border border-border p-5">
               <div className="flex items-center justify-between mb-4">
                 <p className="text-xs font-bold uppercase tracking-wider text-muted-foreground">
-                  Medications ({filledRows.length})
+                  Aushadhi Yoga ({filledRows.length})
                 </p>
                 <button onClick={addRow}
                   className="flex items-center gap-1.5 text-xs text-herb-green font-semibold hover:underline">
@@ -554,14 +555,14 @@ export default function PrescribePage() {
                           className="w-full px-2.5 py-1.5 text-xs border border-border rounded-lg focus:outline-none focus:border-herb-green/50 bg-white" />
                       </div>
                       <div>
-                        <label className="text-[9px] font-semibold uppercase tracking-wider text-muted-foreground block mb-1">Frequency</label>
+                        <label className="text-[9px] font-semibold uppercase tracking-wider text-muted-foreground block mb-1">Sevana Kala</label>
                         <select value={row.frequency} onChange={e => updateRow({ ...row, frequency: e.target.value })}
                           className="w-full px-2.5 py-1.5 text-xs border border-border rounded-lg focus:outline-none bg-white">
                           {FREQ_OPTIONS.map(o => <option key={o}>{o}</option>)}
                         </select>
                       </div>
                       <div>
-                        <label className="text-[9px] font-semibold uppercase tracking-wider text-muted-foreground block mb-1">Duration</label>
+                        <label className="text-[9px] font-semibold uppercase tracking-wider text-muted-foreground block mb-1">Avadhi (Duration)</label>
                         <select value={row.duration} onChange={e => updateRow({ ...row, duration: e.target.value })}
                           className="w-full px-2.5 py-1.5 text-xs border border-border rounded-lg focus:outline-none bg-white">
                           {DURATION_OPT.map(o => <option key={o}>{o}</option>)}
@@ -598,9 +599,9 @@ export default function PrescribePage() {
             {/* Lifestyle + notes */}
             <div className="bg-white rounded-2xl border border-border p-5 space-y-4">
               <div>
-                <label className="text-xs font-bold uppercase tracking-wider text-muted-foreground block mb-2">Lifestyle & Dietary Advice</label>
+                <label className="text-xs font-bold uppercase tracking-wider text-muted-foreground block mb-2">Pathya-Apathya & Vihara (Diet & Lifestyle)</label>
                 <textarea rows={3} value={lifestyle} onChange={e => setLifestyle(e.target.value)}
-                  placeholder="Diet recommendations, Yoga, Panchakarma, sleep, exercise…"
+                  placeholder="Pathya (favourable): warm, light foods, Moong dal, cooked vegetables…\nApathya (unfavourable): cold, raw, heavy foods, curd at night…\nVihara: Yoga, Pranayama, Abhyanga, Panchakarma recommendations…"
                   className="w-full px-3.5 py-2.5 text-sm border border-border rounded-xl focus:outline-none focus:ring-2 focus:ring-herb-green/20 resize-none placeholder:text-muted-foreground" />
               </div>
               <div className="grid grid-cols-2 gap-4">

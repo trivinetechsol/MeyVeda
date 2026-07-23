@@ -1,13 +1,47 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import {
+  useEffect,
+  useState,
+  type ClipboardEvent,
+  type FormEvent,
+  type KeyboardEvent,
+} from "react";
 import { useRouter } from "next/navigation";
+
 import { useAuth } from "@/contexts/auth-context";
 import { cn } from "@/lib/utils";
-import { createClient } from "@/lib/supabase";
-import { sendOtp, verifyOtp } from "@/lib/otp-client";
+import { createClient } from "@/lib/supabase/client";
 
-type Role = "doctor" | "patient";
+type LoginRole = "doctor" | "patient";
+type UserRole = "practitioner" | "patient" | "admin" | "super_admin";
+
+interface LoginUserResponse {
+  id: string;
+  phone?: string | null;
+  role?: UserRole | LoginRole;
+  name?: string | null;
+  email?: string | null;
+  abhaLinked?: boolean;
+  abha_linked?: boolean;
+}
+
+interface LoginApiResponse {
+  success?: boolean;
+  message?: string;
+  error?: string;
+  data?: {
+    user?: LoginUserResponse;
+  };
+}
+
+interface SendOtpApiResponse {
+  success?: boolean;
+  message?: string;
+  error?: string;
+}
+
+const EMPTY_OTP = ["", "", "", "", "", ""];
 
 const PANEL_INFO = {
   doctor: {
@@ -22,319 +56,778 @@ const PANEL_INFO = {
     headline: "Holistic Care,\nAll in One",
     sub: "Book Ayurveda, Yoga, Homeopathy, Siddha and Naturopathy consultations. Track vitals, view prescriptions and manage your ABHA health locker.",
   },
-};
+} satisfies Record<
+  LoginRole,
+  {
+    badge: string;
+    badgeClass: string;
+    headline: string;
+    sub: string;
+  }
+>;
+
+function getAuthenticatedRole(role: LoginRole): UserRole {
+  return role === "doctor" ? "practitioner" : "patient";
+}
+
+function normalizeUserRole(
+  backendRole: LoginUserResponse["role"],
+  selectedRole: LoginRole
+): UserRole {
+  if (backendRole === "practitioner" || backendRole === "doctor") {
+    return "practitioner";
+  }
+
+  if (backendRole === "patient") {
+    return "patient";
+  }
+  if (backendRole === "admin" || backendRole === "super_admin") {
+    return "admin";
+  }
+
+  return getAuthenticatedRole(selectedRole);
+}
+
+function getDestination(role: UserRole): string {
+  return role === "practitioner" ? "/pro" : "/discover";
+}
 
 export default function LoginPage() {
   const router = useRouter();
-  const { login, user } = useAuth();
+  const { login, user, loading: authLoading } = useAuth();
 
-  const [role, setRole]             = useState<Role>("doctor");
-  const [email, setEmail]           = useState("");
-  const [otp, setOtp]               = useState("");
-  const [otpMode, setOtpMode]       = useState(false);
-  const [error, setError]           = useState("");
-  const [loading, setLoading]       = useState(false);
+  const [role, setRole] = useState<LoginRole>("doctor");
+  const [email, setEmail] = useState("");
+  const [otp, setOtp] = useState<string[]>([...EMPTY_OTP]);
+  const [otpMode, setOtpMode] = useState(false);
+  const [error, setError] = useState("");
+  const [loading, setLoading] = useState(false);
+  const [countdown, setCountdown] = useState(0);
 
-  // Stats state
   const [stats, setStats] = useState({
     practitioners: 89,
     patients: 1247,
     consultations: 340,
   });
 
-  // Fetch dynamic stats from Supabase
   useEffect(() => {
-    async function fetchStats() {
-      const supabase = createClient();
-      
-      const [pracRes, patRes, apptRes] = await Promise.all([
-        supabase.from("practitioners").select("id", { count: "exact", head: true }),
-        supabase.from("patients").select("id", { count: "exact", head: true }),
-        supabase.from("appointments").select("id", { count: "exact", head: true }),
-      ]);
-
-      setStats({
-        practitioners: pracRes.count || 89,
-        patients: patRes.count || 1247,
-        consultations: apptRes.count || 340,
-      });
+    if (countdown <= 0) {
+      return;
     }
-    fetchStats();
+
+    const timer = window.setTimeout(() => {
+      setCountdown((current) => Math.max(current - 1, 0));
+    }, 1000);
+
+    return () => window.clearTimeout(timer);
+  }, [countdown]);
+
+  useEffect(() => {
+    let active = true;
+
+    async function fetchStats() {
+      try {
+        const supabase = createClient();
+
+        const [practitionerResult, patientResult, appointmentResult] =
+          await Promise.all([
+            supabase
+              .from("practitioners")
+              .select("id", { count: "exact", head: true }),
+
+            supabase
+              .from("patients")
+              .select("id", { count: "exact", head: true }),
+
+            supabase
+              .from("appointments")
+              .select("id", { count: "exact", head: true }),
+          ]);
+
+        if (!active) {
+          return;
+        }
+
+        setStats({
+          practitioners: practitionerResult.count ?? 89,
+          patients: patientResult.count ?? 1247,
+          consultations: appointmentResult.count ?? 340,
+        });
+      } catch (statsError) {
+        console.error("Failed to load login statistics:", statsError);
+      }
+    }
+
+    void fetchStats();
+
+    return () => {
+      active = false;
+    };
   }, []);
 
-  // redirect if already logged in
+  // Redirect users who are already logged in.
   useEffect(() => {
-    if (user) router.replace(user.role === "practitioner" ? "/pro" : "/discover");
-  }, [user, router]);
+    if (authLoading || !user) {
+      return;
+    }
 
-  async function handleSendOtp(e: React.FormEvent) {
+    router.replace(getDestination(user.role));
+  }, [authLoading, user, router]);
+
+  function resetLoginForm(nextRole: LoginRole) {
+    setRole(nextRole);
+    setEmail("");
+    setOtp([...EMPTY_OTP]);
+    setOtpMode(false);
+    setCountdown(0);
+    setError("");
+  }
+
+  async function handleSendOtp(e: FormEvent<HTMLFormElement>) {
     e.preventDefault();
+
+    const normalizedEmail = email.trim().toLowerCase();
+
+    if (!normalizedEmail) {
+      setError("Please enter your email address.");
+      return;
+    }
+
     setError("");
     setLoading(true);
 
     try {
-      // First verify the user exists in our DB before sending OTP
-      const supabase = createClient();
-      const { data: dbUser, error: userError } = await supabase
-        .from("users")
-        .select("id, role")
-        .eq("email", email)
-        .single();
+      const authenticatedRole = getAuthenticatedRole(role);
 
-      if (userError || !dbUser) {
-        setError("Account not found for this email.");
-        setLoading(false);
-        return;
+      const response = await fetch("/api/auth/send-otp", {
+        method: "POST",
+        credentials: "include",
+        cache: "no-store",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          email: normalizedEmail,
+          role: authenticatedRole,
+        }),
+      });
+
+      const data = (await response
+        .json()
+        .catch(() => null)) as SendOtpApiResponse | null;
+
+      if (!response.ok || data?.success === false) {
+        throw new Error(
+          data?.message ||
+          data?.error ||
+          "Failed to send OTP. Please try again."
+        );
       }
 
-      const expectedRole = role === "doctor" ? "practitioner" : "patient";
-      if (dbUser.role !== expectedRole) {
-        setError("Invalid role selected for this account.");
-        setLoading(false);
-        return;
-      }
-
-      await sendOtp(email);
+      setEmail(normalizedEmail);
+      setOtp([...EMPTY_OTP]);
       setOtpMode(true);
-    } catch (err: any) {
-      console.error(err);
-      setError(err.message || "Failed to send OTP.");
+      setCountdown(300);
+
+      window.setTimeout(() => {
+        document.getElementById("otp-0")?.focus();
+      }, 0);
+    } catch (sendOtpError) {
+      console.error("Send OTP error:", sendOtpError);
+
+      setError(
+        sendOtpError instanceof Error
+          ? sendOtpError.message
+          : "Failed to send OTP."
+      );
     } finally {
       setLoading(false);
     }
   }
 
-  async function handleVerifyOtp(e: React.FormEvent) {
+  function handleOtpInput(index: number, value: string) {
+    const numericValue = value.replace(/\D/g, "");
+
+    setOtp((currentOtp) => {
+      const nextOtp = [...currentOtp];
+      nextOtp[index] = numericValue
+        ? numericValue.slice(-1)
+        : "";
+
+      return nextOtp;
+    });
+
+    if (numericValue && index < EMPTY_OTP.length - 1) {
+      document.getElementById(`otp-${index + 1}`)?.focus();
+    }
+  }
+
+  function handleOtpKeyDown(
+    index: number,
+    e: KeyboardEvent<HTMLInputElement>
+  ) {
+    if (e.key === "Backspace") {
+      e.preventDefault();
+
+      setOtp((currentOtp) => {
+        const nextOtp = [...currentOtp];
+
+        if (nextOtp[index]) {
+          nextOtp[index] = "";
+          return nextOtp;
+        }
+
+        if (index > 0) {
+          nextOtp[index - 1] = "";
+
+          window.setTimeout(() => {
+            document.getElementById(`otp-${index - 1}`)?.focus();
+          }, 0);
+        }
+
+        return nextOtp;
+      });
+
+      return;
+    }
+
+    if (e.key === "ArrowLeft" && index > 0) {
+      document.getElementById(`otp-${index - 1}`)?.focus();
+    }
+
+    if (
+      e.key === "ArrowRight" &&
+      index < EMPTY_OTP.length - 1
+    ) {
+      document.getElementById(`otp-${index + 1}`)?.focus();
+    }
+  }
+
+  function handleOtpPaste(e: ClipboardEvent<HTMLInputElement>) {
     e.preventDefault();
+
+    const pastedValue = e.clipboardData
+      .getData("text")
+      .trim();
+
+    if (!/^\d{6}$/.test(pastedValue)) {
+      setError("Please paste a valid 6-digit OTP.");
+      return;
+    }
+
+    setError("");
+    setOtp(pastedValue.split(""));
+
+    window.setTimeout(() => {
+      document.getElementById("otp-5")?.focus();
+    }, 0);
+  }
+
+  async function handleVerifyOtp(
+    e: FormEvent<HTMLFormElement>
+  ) {
+    e.preventDefault();
+
+    const otpString = otp.join("");
+    const normalizedEmail = email.trim().toLowerCase();
+
+    if (!/^\d{6}$/.test(otpString)) {
+      setError("Please enter the complete 6-digit OTP.");
+      return;
+    }
+
+    if (countdown <= 0) {
+      setError("OTP has expired. Please request a new OTP.");
+      return;
+    }
+
     setError("");
     setLoading(true);
 
     try {
-      await verifyOtp(email, otp);
+      const selectedUserRole = getAuthenticatedRole(role);
 
-      // OTP verified successfully. Now fetch user data and log them in.
-      const supabase = createClient();
-      const { data: dbUser, error: userError } = await supabase
-        .from("users")
-        .select("id, email, mobile, role")
-        .eq("email", email)
-        .single();
+      const response = await fetch("/api/auth/login", {
+        method: "POST",
+        credentials: "include",
+        cache: "no-store",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          email: normalizedEmail,
+          otp: otpString,
+          role: selectedUserRole,
+        }),
+      });
 
-      if (userError || !dbUser) throw new Error("User data error after verification.");
+      const data = (await response
+        .json()
+        .catch(() => null)) as LoginApiResponse | null;
 
-      let name = "Unknown";
-      if (dbUser.role === "practitioner") {
-        const { data: prac } = await supabase.from("practitioners").select("full_name").eq("user_id", dbUser.id).maybeSingle();
-        if (prac) name = prac.full_name;
-      } else {
-        const { data: pat } = await supabase.from("patients").select("full_name").eq("user_id", dbUser.id).maybeSingle();
-        if (pat) name = pat.full_name;
+      if (!response.ok || data?.success === false) {
+        throw new Error(
+          data?.message ||
+          data?.error ||
+          "Failed to verify OTP."
+        );
       }
+
+      const dbUser = data?.data?.user;
+
+      if (!dbUser?.id) {
+        throw new Error(
+          "Login succeeded, but user information was not returned."
+        );
+      }
+
+      const authenticatedRole = normalizeUserRole(
+        dbUser.role,
+        role
+      );
 
       login({
         id: dbUser.id,
-        phone: dbUser.mobile,
-        role: dbUser.role as any,
-        name,
-        abhaLinked: true,
-        email: dbUser.email,
+        phone: dbUser.phone ?? "",
+        role: authenticatedRole,
+        name: dbUser.name?.trim() || "Verified User",
+        abhaLinked:
+          dbUser.abhaLinked ??
+          dbUser.abha_linked ??
+          false,
+        email: dbUser.email ?? normalizedEmail,
       });
 
-      router.push(dbUser.role === "practitioner" ? "/pro" : "/discover");
+      const destination = getDestination(authenticatedRole);
 
-    } catch (err: any) {
-      console.error(err);
-      setError(err.message || "Failed to verify OTP.");
-    } finally {
+      /*
+       * A full navigation is intentional here.
+       *
+       * The login API creates HttpOnly authentication cookies.
+       * window.location.replace forces the next protected page and
+       * middleware to read the newly created cookies immediately.
+       *
+       * It also prevents the browser Back button from returning to
+       * the OTP page after login.
+       */
+      window.location.replace(destination);
+    } catch (verifyOtpError) {
+      console.error("Verify OTP error:", verifyOtpError);
+
+      setError(
+        verifyOtpError instanceof Error
+          ? verifyOtpError.message
+          : "Failed to verify OTP."
+      );
+
       setLoading(false);
     }
   }
 
   const panel = PANEL_INFO[role];
 
-  const currentStats = role === "doctor" ? [
-    { label: "AYUSH Practitioners", value: `${stats.practitioners}` },
-    { label: "Consultations",       value: `${stats.consultations}` },
-    { label: "Avg Rating",          value: "4.8 ★" },
-    { label: "Patient Records",     value: `${stats.patients}` },
-  ] : [
-    { label: "Doctors on Platform",  value: `${stats.practitioners}` },
-    { label: "AYUSH Disciplines",    value: "6" },
-    { label: "Cities Covered",       value: "24" },
-    { label: "Active Patients",      value: `${stats.patients}` },
-  ];
+  const currentStats =
+    role === "doctor"
+      ? [
+        {
+          label: "AYUSH Practitioners",
+          value: String(stats.practitioners),
+        },
+        {
+          label: "Consultations",
+          value: String(stats.consultations),
+        },
+        {
+          label: "Avg Rating",
+          value: "4.8 ★",
+        },
+        {
+          label: "Patient Records",
+          value: String(stats.patients),
+        },
+      ]
+      : [
+        {
+          label: "Doctors on Platform",
+          value: String(stats.practitioners),
+        },
+        {
+          label: "AYUSH Disciplines",
+          value: "6",
+        },
+        {
+          label: "Cities Covered",
+          value: "24",
+        },
+        {
+          label: "Active Patients",
+          value: String(stats.patients),
+        },
+      ];
 
   return (
-    <div className="min-h-screen flex">
+    <div className="flex min-h-screen">
       {/* Left brand panel */}
-      <div className="hidden lg:flex lg:w-1/2 bg-clinical-dark flex-col justify-between p-12 transition-all duration-300">
+      <div className="hidden flex-col justify-between bg-clinical-dark p-12 transition-all duration-300 lg:flex lg:w-1/2">
         <div>
-          {/* Logo */}
           <div className="flex items-center gap-3">
-            <div className="w-9 h-9 rounded-xl bg-herb-green flex items-center justify-center">
-              <span className="text-white font-bold text-sm">M</span>
+            <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-herb-green">
+              <span className="text-sm font-bold text-white">
+                M
+              </span>
             </div>
-            <span className="text-white font-semibold text-lg tracking-tight">MeyVeda</span>
-            <span className={cn("text-xs px-2 py-0.5 rounded-full font-semibold transition-all", panel.badgeClass)}>
+
+            <span className="text-lg font-semibold tracking-tight text-white">
+              MeyVeda
+            </span>
+
+            <span
+              className={cn(
+                "rounded-full px-2 py-0.5 text-xs font-semibold transition-all",
+                panel.badgeClass
+              )}
+            >
               {panel.badge}
             </span>
           </div>
 
-          {/* Headline */}
           <div className="mt-16">
-            <h1 className="text-white text-4xl font-display font-bold leading-tight whitespace-pre-line">
+            <h1 className="whitespace-pre-line font-display text-4xl font-bold leading-tight text-white">
               {panel.headline}
             </h1>
-            <p className="text-white/50 mt-4 text-sm leading-relaxed max-w-sm">
+
+            <p className="mt-4 max-w-sm text-sm leading-relaxed text-white/50">
               {panel.sub}
             </p>
           </div>
 
-          {/* Stats */}
           <div className="mt-10 grid grid-cols-2 gap-4">
-            {currentStats.map((s) => (
-              <div key={s.label} className="bg-white/5 rounded-2xl p-4">
-                <p className="text-white font-bold text-xl font-display">{s.value}</p>
-                <p className="text-white/40 text-xs mt-0.5">{s.label}</p>
+            {currentStats.map((stat) => (
+              <div
+                key={stat.label}
+                className="rounded-2xl bg-white/5 p-4"
+              >
+                <p className="font-display text-xl font-bold text-white">
+                  {stat.value}
+                </p>
+
+                <p className="mt-0.5 text-xs text-white/40">
+                  {stat.label}
+                </p>
               </div>
             ))}
           </div>
 
-          {/* Divider + AYUSH badge row */}
-          <div className="mt-10 flex items-center gap-3 flex-wrap">
-            {["Ayurveda", "Yoga", "Unani", "Siddha", "Homeopathy", "Naturopathy"].map((s) => (
-              <span key={s} className="text-[10px] font-medium text-white/30 border border-white/10 px-2.5 py-1 rounded-full">
-                {s}
+          <div className="mt-10 flex flex-wrap items-center gap-3">
+            {[
+              "Ayurveda",
+              "Yoga",
+              "Unani",
+              "Siddha",
+              "Homeopathy",
+              "Naturopathy",
+            ].map((discipline) => (
+              <span
+                key={discipline}
+                className="rounded-full border border-white/10 px-2.5 py-1 text-[10px] font-medium text-white/30"
+              >
+                {discipline}
               </span>
             ))}
           </div>
         </div>
 
-        <p className="text-white/20 text-xs">© 2026 MeyVeda · Trivine Tech Solutions</p>
+        <p className="text-xs text-white/20">
+          © 2026 MeyVeda · Trivine Tech Solutions
+        </p>
       </div>
 
       {/* Right login panel */}
-      <div className="flex-1 flex items-center justify-center p-6 bg-background">
+      <div className="flex flex-1 items-center justify-center bg-background p-6">
         <div className="w-full max-w-sm">
-          {/* Mobile logo */}
-          <div className="lg:hidden flex items-center gap-2 mb-8">
-            <div className="w-8 h-8 rounded-xl bg-herb-green flex items-center justify-center">
-              <span className="text-white font-bold text-sm">M</span>
+          <div className="mb-8 flex items-center gap-2 lg:hidden">
+            <div className="flex h-8 w-8 items-center justify-center rounded-xl bg-herb-green">
+              <span className="text-sm font-bold text-white">
+                M
+              </span>
             </div>
-            <span className="font-semibold text-foreground">MeyVeda</span>
+
+            <span className="font-semibold text-foreground">
+              MeyVeda
+            </span>
           </div>
 
-          {/* Role toggle */}
-          <div className="flex gap-1 bg-muted rounded-xl p-1 mb-8">
-            {(["doctor", "patient"] as Role[]).map((r) => (
-              <button
-                key={r}
-                onClick={() => { setRole(r); setError(""); setEmail(""); setOtp(""); setOtpMode(false); }}
-                className={cn(
-                  "flex-1 flex items-center justify-center gap-2 py-2.5 text-sm font-semibold rounded-lg transition-all",
-                  role === r ? "bg-white text-foreground shadow-sm" : "text-muted-foreground hover:text-foreground"
-                )}
-              >
-                {r === "doctor" ? (
-                  <>
-                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
-                      <path d="M22 12h-4l-3 9L9 3l-3 9H2"/>
-                    </svg>
-                    Doctor
-                  </>
-                ) : (
-                  <>
-                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
-                      <circle cx="12" cy="8" r="4"/><path d="M4 20c0-4 3.6-7 8-7s8 3 8 7"/>
-                    </svg>
-                    Patient
-                  </>
-                )}
-              </button>
-            ))}
+          {/* Role selector */}
+          <div className="mb-8 flex gap-1 rounded-xl bg-muted p-1">
+            {(["doctor", "patient"] as LoginRole[]).map(
+              (roleOption) => (
+                <button
+                  key={roleOption}
+                  type="button"
+                  disabled={loading}
+                  onClick={() =>
+                    resetLoginForm(roleOption)
+                  }
+                  className={cn(
+                    "flex flex-1 items-center justify-center gap-2 rounded-lg py-2.5 text-sm font-semibold transition-all",
+                    role === roleOption
+                      ? "bg-white text-foreground shadow-sm"
+                      : "text-muted-foreground hover:text-foreground"
+                  )}
+                >
+                  {roleOption === "doctor" ? (
+                    <>
+                      <svg
+                        width="14"
+                        height="14"
+                        viewBox="0 0 24 24"
+                        fill="none"
+                        stroke="currentColor"
+                        strokeWidth={2}
+                        aria-hidden="true"
+                      >
+                        <path d="M22 12h-4l-3 9L9 3l-3 9H2" />
+                      </svg>
+                      Doctor
+                    </>
+                  ) : (
+                    <>
+                      <svg
+                        width="14"
+                        height="14"
+                        viewBox="0 0 24 24"
+                        fill="none"
+                        stroke="currentColor"
+                        strokeWidth={2}
+                        aria-hidden="true"
+                      >
+                        <circle cx="12" cy="8" r="4" />
+                        <path d="M4 20c0-4 3.6-7 8-7s8 3 8 7" />
+                      </svg>
+                      Patient
+                    </>
+                  )}
+                </button>
+              )
+            )}
           </div>
 
           <h2 className="font-display text-2xl font-bold text-foreground">
-            {role === "doctor" ? "Doctor Sign In" : "Patient Sign In"}
+            {role === "doctor"
+              ? "Doctor Sign In"
+              : "Patient Sign In"}
           </h2>
-          <p className="text-sm text-muted-foreground mt-1">
+
+          <p className="mt-1 text-sm text-muted-foreground">
             {role === "doctor"
               ? "Access your EMR, patient queue, and prescriptions"
               : "Book consultations, view records and manage your health"}
           </p>
 
-          <form onSubmit={otpMode ? handleVerifyOtp : handleSendOtp} className="mt-8 space-y-4">
+          <form
+            onSubmit={
+              otpMode ? handleVerifyOtp : handleSendOtp
+            }
+            className="mt-8 space-y-4"
+          >
             {!otpMode ? (
               <div>
-                <label className="text-xs font-semibold text-foreground block mb-1.5">Email Address</label>
+                <label
+                  htmlFor="email"
+                  className="mb-1.5 block text-xs font-semibold text-foreground"
+                >
+                  Email Address
+                </label>
+
                 <input
+                  id="email"
                   type="email"
                   value={email}
-                  onChange={(e) => setEmail(e.target.value)}
-                  placeholder={role === "doctor" ? "doctor@meyveda.in" : "patient@meyveda.in"}
+                  disabled={loading}
+                  autoComplete="email"
+                  onChange={(e) =>
+                    setEmail(e.target.value)
+                  }
+                  placeholder={
+                    role === "doctor"
+                      ? "doctor@meyveda.in"
+                      : "patient@meyveda.in"
+                  }
                   required
-                  className="w-full px-3.5 py-2.5 text-sm border border-border rounded-xl focus:outline-none focus:ring-2 focus:ring-herb-green/20 focus:border-herb-green/50 bg-white placeholder:text-muted-foreground transition-all"
+                  className="w-full rounded-xl border border-border bg-white px-3.5 py-2.5 text-sm transition-all placeholder:text-muted-foreground focus:border-herb-green/50 focus:outline-none focus:ring-2 focus:ring-herb-green/20 disabled:cursor-not-allowed disabled:opacity-60"
                 />
               </div>
             ) : (
               <div>
-                <div className="flex items-center justify-between mb-1.5">
-                  <label className="text-xs font-semibold text-foreground">Enter 6-digit OTP</label>
-                  <button type="button" onClick={() => setOtpMode(false)} className="text-[11px] text-herb-green hover:underline">Change email</button>
+                <div className="mb-3 flex items-center justify-between">
+                  <label className="text-xs font-semibold text-foreground">
+                    Enter 6-digit OTP
+                  </label>
+
+                  <button
+                    type="button"
+                    disabled={loading}
+                    onClick={() => {
+                      setOtpMode(false);
+                      setOtp([...EMPTY_OTP]);
+                      setCountdown(0);
+                      setError("");
+                    }}
+                    className="text-[11px] text-herb-green hover:underline disabled:opacity-60"
+                  >
+                    Change email
+                  </button>
                 </div>
-                <input
-                  type="text"
-                  value={otp}
-                  onChange={(e) => setOtp(e.target.value)}
-                  placeholder="••••••"
-                  maxLength={6}
-                  required
-                  className="w-full px-3.5 py-2.5 text-sm border border-border rounded-xl focus:outline-none focus:ring-2 focus:ring-herb-green/20 focus:border-herb-green/50 bg-white placeholder:text-muted-foreground transition-all tracking-widest text-center"
-                />
+
+                <div className="mb-1 flex justify-center gap-2.5">
+                  {otp.map((digit, index) => (
+                    <input
+                      key={index}
+                      id={`otp-${index}`}
+                      type="text"
+                      inputMode="numeric"
+                      autoComplete={
+                        index === 0
+                          ? "one-time-code"
+                          : "off"
+                      }
+                      maxLength={1}
+                      value={digit}
+                      disabled={loading}
+                      aria-label={`OTP digit ${index + 1}`}
+                      onChange={(e) =>
+                        handleOtpInput(
+                          index,
+                          e.target.value
+                        )
+                      }
+                      onKeyDown={(e) =>
+                        handleOtpKeyDown(index, e)
+                      }
+                      onPaste={handleOtpPaste}
+                      className={cn(
+                        "h-14 w-11 rounded-2xl border bg-background text-center font-mono text-xl font-bold shadow-sm transition-all duration-200 focus:scale-105 focus:outline-none focus:ring-4 focus:ring-herb-green/15 disabled:cursor-not-allowed disabled:opacity-60",
+                        digit
+                          ? "border-2 border-herb-green bg-herb-green/5"
+                          : "border-border hover:border-muted-foreground/30 focus:border-herb-green"
+                      )}
+                    />
+                  ))}
+                </div>
+
+                <div className="mt-2 flex items-center justify-between">
+                  <span className="text-[11px] text-muted-foreground">
+                    {countdown > 0
+                      ? `Expires in ${Math.floor(
+                        countdown / 60
+                      )}:${String(
+                        countdown % 60
+                      ).padStart(2, "0")}`
+                      : "OTP Expired"}
+                  </span>
+
+                  {countdown === 0 && (
+                    <button
+                      type="button"
+                      disabled={loading}
+                      onClick={() => {
+                        const formEvent = {
+                          preventDefault: () => undefined,
+                        } as FormEvent<HTMLFormElement>;
+
+                        void handleSendOtp(formEvent);
+                      }}
+                      className="text-[11px] font-medium text-herb-green hover:underline disabled:opacity-60"
+                    >
+                      Resend OTP
+                    </button>
+                  )}
+                </div>
               </div>
             )}
 
             {error && (
-              <div className="bg-red-50 border border-red-200 rounded-xl px-3.5 py-2.5 text-sm text-red-700">
+              <div
+                role="alert"
+                className="rounded-xl border border-red-200 bg-red-50 px-3.5 py-2.5 text-sm text-red-700"
+              >
                 {error}
               </div>
             )}
 
             <button
               type="submit"
-              disabled={loading}
-              className="w-full py-3 bg-herb-green text-white font-semibold rounded-xl hover:bg-herb-green/90 transition-all active:scale-95 disabled:opacity-60 disabled:cursor-not-allowed mt-2"
+              disabled={
+                loading ||
+                (otpMode &&
+                  otp.join("").length !== 6)
+              }
+              className="mt-2 w-full rounded-xl bg-herb-green py-3 font-semibold text-white transition-all hover:bg-herb-green/90 active:scale-95 disabled:cursor-not-allowed disabled:opacity-60"
             >
-              {loading ? "Processing…" : otpMode ? "Verify & Sign In" : "Send OTP"}
+              {loading
+                ? "Processing…"
+                : otpMode
+                  ? "Verify & Sign In"
+                  : "Send OTP"}
             </button>
           </form>
 
-          {/* OR divider */}
           <div className="mt-5 flex items-center gap-3">
-            <div className="flex-1 h-px bg-border" />
-            <span className="text-xs text-muted-foreground">or</span>
-            <div className="flex-1 h-px bg-border" />
+            <div className="h-px flex-1 bg-border" />
+            <span className="text-xs text-muted-foreground">
+              or
+            </span>
+            <div className="h-px flex-1 bg-border" />
           </div>
 
-          {/* OTP option */}
-          <button className="mt-4 w-full py-2.5 border border-border rounded-xl text-sm font-medium text-foreground hover:bg-muted transition-colors flex items-center justify-center gap-2">
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
-              <rect x="5" y="2" width="14" height="20" rx="2" ry="2"/>
-              <line x1="12" y1="18" x2="12.01" y2="18"/>
+          <button
+            type="button"
+            className="mt-4 flex w-full items-center justify-center gap-2 rounded-xl border border-border py-2.5 text-sm font-medium text-foreground transition-colors hover:bg-muted"
+          >
+            <svg
+              width="14"
+              height="14"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth={2}
+              aria-hidden="true"
+            >
+              <rect
+                x="5"
+                y="2"
+                width="14"
+                height="20"
+                rx="2"
+                ry="2"
+              />
+              <line
+                x1="12"
+                y1="18"
+                x2="12.01"
+                y2="18"
+              />
             </svg>
+
             Continue with OTP on Mobile
           </button>
 
-          {/* Footer links */}
           <p className="mt-6 text-center text-xs text-muted-foreground">
             New to MeyVeda?{" "}
-            <a href="/onboarding" className="text-herb-green font-semibold hover:underline">
+            <a
+              href="/onboarding"
+              className="font-semibold text-herb-green hover:underline"
+            >
               Create account
             </a>
           </p>
+
           <p className="mt-2 text-center text-xs text-muted-foreground">
             Admin?{" "}
-            <a href="/admin" className="text-muted-foreground hover:text-foreground hover:underline">
+            <a
+              href="/admin"
+              className="text-muted-foreground hover:text-foreground hover:underline"
+            >
               Admin sign in →
             </a>
           </p>

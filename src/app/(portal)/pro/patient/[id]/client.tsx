@@ -1,1435 +1,1126 @@
 "use client";
 
 import Link from "next/link";
-import { useParams } from "next/navigation";
-import { useState, useEffect } from "react";
+import { useParams, useRouter } from "next/navigation";
+import { useState, useRef, useEffect, useMemo } from "react";
 import { cn } from "@/lib/utils";
-import { createClient } from "@/lib/supabase";
+import { useQuery } from "@/hooks/useQuery";
+import { apiClient } from "@/shared/api/api-client";
+import { useAuth } from "@/contexts/auth-context";
+import { createClient } from "@/lib/supabase/client";
+import { usePractitioner } from "@/hooks/use-discover";
+import { usePractitionerSlots, usePractitionerAvailableDates } from "@/hooks/use-availability";
 
-type Tab = "intake" | "vitals" | "medical-history" | "history" | "care-team" | "reports";
-
-type VitalsRecord = {
-  date: string; doctor: string; doctorInitials: string; isYou?: boolean;
-  bpSys: number; bpDia: number; pulse: number; temp: number;
-  spo2: number; rr: number; weight: number; height: number;
-};
-
-type VisitRecord = {
-  id: string;
-  date: string; time: string; duration: string;
-  mode: "video" | "clinic";
-  doctor: string; specialty: string; doctorInitials: string; isYou?: boolean;
-  chiefComplaint: string;
-  soap: { S: string; O: string; A: string; P: string };
-  diagnosis: string;
-  vitals: { bpSys: number; bpDia: number; pulse: number; temp: number; spo2: number; rr: number; weight: number; height: number } | null;
-  medications: { name: string; dose: string; frequency: string; anupana: string; system: string }[];
-  investigations: string[];
-  referrals: { specialty: string; urgency: string }[];
-  followUpDate: string | null;
-  followUpInstructions: string;
-  type: "initial" | "follow-up" | "review" | "urgent";
-};
-
-function vStat(key: string, n: number): "normal" | "warning" | "alert" {
-  if (key === "bpSys")  return n < 90 ? "alert"   : n <= 120 ? "normal" : n <= 139 ? "warning" : "alert";
-  if (key === "bpDia")  return n < 60 ? "warning"  : n <= 80  ? "normal" : n <= 89  ? "warning" : "alert";
-  if (key === "pulse")  return n < 60 || n > 100   ? "warning" : "normal";
-  if (key === "temp")   return n < 97 ? "warning"  : n <= 99  ? "normal" : n <= 100.4 ? "warning" : "alert";
-  if (key === "spo2")   return n < 90 ? "alert"    : n < 95   ? "warning" : "normal";
-  if (key === "rr")     return n < 12 || n > 20    ? "warning" : "normal";
-  return "normal";
+function usePatientIntakeDetails(patientId: string) {
+  return useQuery<any>(
+    () => (patientId ? apiClient<{ data: any }>(`/api/registry/${patientId}/intake`).then((r) => r.data) : Promise.resolve(null)),
+    [patientId]
+  );
 }
 
-function bmi(w: number, h: number) { return (w / Math.pow(h / 100, 2)).toFixed(1); }
-
-function trend(curr: number, prev: number, positive: "up" | "down"): { arrow: string; color: string } {
-  const delta = ((curr - prev) / prev) * 100;
-  if (Math.abs(delta) < 2) return { arrow: "→", color: "text-muted-foreground" };
-  const up = curr > prev;
-  const good = positive === "up" ? up : !up;
-  return { arrow: up ? "↑" : "↓", color: good ? "text-herb-green" : "text-amber-600" };
+function useNewDoctorSlots(doctorId: string | undefined, date: string) {
+  return useQuery<any[]>(
+    () =>
+      doctorId && date
+        ? apiClient<{ data: any[] }>("/api/discover/new-doctor-slots", { params: { doctorId, date } }).then((r) => r.data)
+        : Promise.resolve([]),
+    [doctorId, date]
+  );
 }
 
-interface SocialHistory {
-  occupation: string;
-  marital: string;
-  tobacco: string;
-  alcohol: string;
-  diet: string;
-  exercise: string;
-  notes?: string;
+function useNewDoctorAvailableDates(doctorId: string | undefined) {
+  return useQuery<string[]>(
+    () =>
+      doctorId
+        ? apiClient<{ data: string[] }>("/api/discover/new-doctor-dates", { params: { doctorId } }).then((r) => r.data)
+        : Promise.resolve([]),
+    [doctorId]
+  );
 }
 
-interface MedicalHistory {
-  allergies: any[];
-  medications: any[];
-  pmh: any[];
-  surgeries: any[];
-  family: any[];
-  social: SocialHistory;
-  immunizations: any[];
+async function saveCompleteConsultation(payload: Record<string, unknown>): Promise<{ success: boolean; error?: string }> {
+  try {
+    const response = await fetch("/api/consultations/complete", {
+      method: "POST",
+      credentials: "include",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    });
+    const result = await response.json();
+    if (!response.ok || !result.success) {
+      return { success: false, error: result.error || "Failed to save consultation" };
+    }
+    return { success: true };
+  } catch (err) {
+    return { success: false, error: err instanceof Error ? err.message : "Failed to save consultation" };
+  }
 }
+import { 
+  User, Activity, Syringe, Heart, Fingerprint, Calendar, Phone,
+  MapPin, Stethoscope, Droplets, Thermometer, Weight, Wind, Flame,
+  FileText, ArrowUpCircle, Plus, Trash2, FileUp, Save, History, Clock,
+  ChevronRight
+} from "lucide-react";
 
-const REPORTS = [
-  { name: "Prakriti Analysis Report.pdf", date: "2026-05-15", type: "Prakriti", size: "1.2 MB" },
-  { name: "Liver Function Test (LFT).pdf", date: "2026-05-10", type: "Lab", size: "2.4 MB" },
-  { name: "CBC & Lipid Profile.pdf", date: "2026-04-20", type: "Lab", size: "1.8 MB" }
-];
+const SectionCard = ({ title, icon: Icon, children }: { title: string, icon: any, children: React.ReactNode }) => (
+  <div className="bg-white rounded-[16px] border border-[#E5E7EB] shadow-[0_2px_8px_rgba(0,0,0,0.04)] p-8 mb-8">
+    <div className="flex items-center gap-3 mb-8">
+      <div className="w-10 h-10 rounded-xl bg-indigo-50 border border-indigo-100 flex items-center justify-center text-indigo-600 shadow-sm">
+        <Icon className="w-5 h-5" />
+      </div>
+      <h2 className="text-xl font-semibold text-gray-900">{title}</h2>
+    </div>
+    {children}
+  </div>
+);
 
 export default function PatientIntakeClient() {
   const params = useParams();
+  const router = useRouter();
+  const { user } = useAuth();
   const id = (params.id as string) || "p1";
 
-  const [patient, setPatient] = useState<any>(null);
-  const [visits, setVisits] = useState<any[]>([]);
-  const [careTeam, setCareTeam] = useState<any[]>([]);
-  const [vitalsHistory, setVitalsHistory] = useState<any[]>([]);
-  const [medHistory, setMedHistory] = useState<MedicalHistory>({
-    allergies: [],
-    medications: [],
-    pmh: [],
-    surgeries: [],
-    family: [],
-    social: { occupation: "", marital: "", tobacco: "", alcohol: "", diet: "", exercise: "" },
-    immunizations: []
-  });
+  const { data: intakeData, loading: isLoading, error } = usePatientIntakeDetails(id);
+  const patient = intakeData?.patient;
+  const vitalsHistory = intakeData?.vitalsHistory || [];
 
   const latestVitals = vitalsHistory[0] ?? {
     date: "No record", doctor: "N/A", doctorInitials: "N/A",
     bpSys: 120, bpDia: 80, pulse: 72, temp: 98.6, spo2: 98, rr: 16, weight: 70, height: 170
   };
-  const prevVitals = vitalsHistory[1] ?? null;
+  // State for editable patient details header card
+  const [height, setHeight] = useState<number | "">("");
+  const [weight, setWeight] = useState<number | "">("");
+  const [bloodGroup, setBloodGroup] = useState("");
+  const [address, setAddress] = useState("");
 
-  const [activeTab, setActiveTab] = useState<Tab>("intake");
-  const [expandedVisit, setExpandedVisit] = useState<string | null>(null);
-  const [visitSoapTab, setVisitSoapTab]   = useState<"S" | "O" | "A" | "P">("S");
-  const [openMHSection, setOpenMHSection] = useState<Record<string, boolean>>({
-    allergies: true, medications: true, pmh: false, surgeries: false, family: false, social: false, immunizations: false,
+  // State for Section 2 - Consultation Details
+  const [visitReason, setVisitReason] = useState("");
+  const [chiefComplaints, setChiefComplaints] = useState<string[]>([]);
+  const [complaintInput, setComplaintInput] = useState("");
+  const [presentIllness, setPresentIllness] = useState("");
+  const [previousHistory, setPreviousHistory] = useState("");
+  const [previousCalls, setPreviousCalls] = useState("");
+
+  // State for Section 3 - Recorded Vitals
+  const [vitals, setVitals] = useState({
+    bpSys: "",
+    bpDia: "",
+    pulse: "",
+    temp: "",
+    spo2: "",
+    weight: "",
+    bmi: "",
   });
-  const [isLoading, setIsLoading] = useState(true);
 
-  // Initialize expandedVisit when visits are loaded/initialized
-  useEffect(() => {
-    if (visits && visits.length > 0 && !expandedVisit) {
-      setExpandedVisit(visits[0].id);
+  // State for Section 5 - Prescription
+  const [medicines, setMedicines] = useState([
+    { id: 1, name: "", form: "Tablet", dose: "", frequency: "Morning", timing: "After Food", duration: "", instructions: "" }
+  ]);
+  const [prescriptionNotes, setPrescriptionNotes] = useState("");
+  const editorRef = useRef<HTMLDivElement>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+
+  // State for Section 6 - Upload Reports
+  const [uploadedFiles, setUploadedFiles] = useState<File[]>([]);
+
+  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    if (e.target.files) {
+      setUploadedFiles(prev => [...prev, ...Array.from(e.target.files!)]);
     }
-  }, [visits, expandedVisit]);
+  };
 
-  useEffect(() => {
-    async function loadData() {
-      try {
-        const supabase = createClient();
-        
-        let cleanId = id;
-        if (id === "p1") cleanId = "c0000000-0000-0000-0000-000000000001";
-        else if (id === "p2") cleanId = "c0000000-0000-0000-0000-000000000002";
-        else if (id === "p3") cleanId = "c0000000-0000-0000-0000-000000000003";
+  const handleRemoveFile = (index: number) => {
+    setUploadedFiles(prev => prev.filter((_, i) => i !== index));
+  };
 
-        // Validate cleanId is a UUID
-        const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-        if (!uuidRegex.test(cleanId)) {
-          setIsLoading(false);
-          return;
-        }
+  const handleFormat = (command: string) => {
+    document.execCommand(command, false);
+    if (editorRef.current) {
+      editorRef.current.focus();
+    }
+  };
 
-        // 1. Fetch Patient
-        const { data: dbPat, error: patError } = await supabase
-          .from("patients")
-          .select(`
-            id,
-            full_name,
-            date_of_birth,
-            gender,
-            prakriti,
-            user_id,
-            user:users (
-              mobile,
-              email
-            )
-          `)
-          .eq("id", cleanId)
-          .single();
+  // State for Section 7 & 8
+  const [followUpInstructions, setFollowUpInstructions] = useState("");
+  const [upcomingCallDate, setUpcomingCallDate] = useState("");
+  const [upcomingCallTime, setUpcomingCallTime] = useState("");
+  const [isCallFixed, setIsCallFixed] = useState(false);
+  const [isUpcomingVisible, setIsUpcomingVisible] = useState(false);
 
-        if (patError || !dbPat) {
-          console.error("Error fetching patient:", patError);
-          setIsLoading(false);
-          return;
-        }
+  // Calendar booking states
+  const [calendarMonth, setCalendarMonth] = useState(new Date().getMonth());
+  const [calendarYear, setCalendarYear] = useState(new Date().getFullYear());
+  const [selectedCalendarDate, setSelectedCalendarDate] = useState("");
+  const [showCalendarPanel, setShowCalendarPanel] = useState(false);
+  const [upcomingCallMode, setUpcomingCallMode] = useState<"video" | "clinic">("video");
 
-        // 2. Fetch ABHA link
-        const { data: dbAbha } = await supabase
-          .from("abha_links")
-          .select("abha_id, abha_address")
-          .eq("user_id", dbPat.user_id)
-          .maybeSingle();
+  const { data: legacyDoc } = usePractitioner(user?.id);
+  const isLegacyPractitioner = !!legacyDoc;
 
-        // 3. Fetch today's appointment or latest appointment for today's details
-        const today = new Date().toISOString().split("T")[0];
-        const { data: dbAppts } = await supabase
-          .from("appointments")
-          .select(`
-            id,
-            mode,
-            scheduled_date,
-            scheduled_time,
-            reason_for_visit,
-            status
-          `)
-          .eq("patient_id", cleanId)
-          .order("scheduled_date", { ascending: false })
-          .order("scheduled_time", { ascending: false });
+  const { data: legacyDates, loading: legacyDatesLoading } = usePractitionerAvailableDates(user?.id);
+  const { data: newDates, loading: newDatesLoading } = useNewDoctorAvailableDates(user?.id);
 
-        const todayAppt = dbAppts?.find((a: any) => a.scheduled_date === today) || dbAppts?.[0];
+  const rawAvailableDates = isLegacyPractitioner ? legacyDates : newDates;
+  const datesLoading = isLegacyPractitioner ? legacyDatesLoading : newDatesLoading;
 
-        // Format patient info
-        let age = 0;
-        if (dbPat.date_of_birth) {
-          const birthDate = new Date(dbPat.date_of_birth);
-          age = new Date().getFullYear() - birthDate.getFullYear();
-        }
+  const selectedDate = selectedCalendarDate || rawAvailableDates?.[0] || "";
 
-        const formatTime = (timeStr: string) => {
-          if (!timeStr) return "";
-          const [h, m] = timeStr.split(":");
-          const hours = parseInt(h, 10);
-          const period = hours >= 12 ? "PM" : "AM";
-          const h12 = hours % 12 || 12;
-          return `${h12}:${m} ${period}`;
-        };
+  const legacySlotsQuery = usePractitionerSlots(user?.id, selectedDate);
+  const newSlotsQuery = useNewDoctorSlots(user?.id, selectedDate);
 
-        const updatedPatient = {
-          name: dbPat.full_name || "Unknown",
-          age,
-          gender: dbPat.gender ? dbPat.gender.charAt(0).toUpperCase() + dbPat.gender.slice(1) : "Unknown",
-          phone: (Array.isArray(dbPat.user) ? dbPat.user[0]?.mobile : (dbPat.user as any)?.mobile) || "",
-          abha: dbAbha ? `${dbAbha.abha_id} (${dbAbha.abha_address || ""})` : null,
-          prakriti: dbPat.prakriti || "Vata-Pitta",
-          reason: todayAppt?.reason_for_visit || "Routine check-up",
-          mode: (todayAppt?.mode === "video" ? "video" : "clinic") as "video" | "clinic",
-          time: todayAppt ? formatTime(todayAppt.scheduled_time) : "N/A",
-          symptoms: todayAppt?.reason_for_visit ? [todayAppt.reason_for_visit] : [],
-          duration: todayAppt ? "Scheduled" : "N/A",
-        };
+  const rawSlots = isLegacyPractitioner ? (legacySlotsQuery.data ?? []) : (newSlotsQuery.data ?? []);
+  const slotsLoading = isLegacyPractitioner ? legacySlotsQuery.loading : newSlotsQuery.loading;
 
-        setPatient(updatedPatient);
+  // Deduplicate slots
+  const slotMap = new Map<string, any>();
+  for (const s of rawSlots) {
+    const key = s.timeValue || s.startTime;
+    if (slotMap.has(key)) {
+      const ex = slotMap.get(key);
+      const mode = s.mode || s.consultMode;
+      if (mode && !ex.modes.includes(mode)) ex.modes.push(mode);
+    } else {
+      const mode = s.mode || s.consultMode;
+      slotMap.set(key, { ...s, modes: s.modes || (mode ? [mode] : []) });
+    }
+  }
+  const slots = Array.from(slotMap.values());
 
-        // 4. Fetch Consultations, EMR Notes, and Prescriptions
-        const { data: dbConsults } = await supabase
-          .from("consultations")
-          .select(`
-            id,
-            mode,
-            created_at,
-            appointment:appointments (
-              id,
-              scheduled_date,
-              scheduled_time
-            ),
-            practitioner:practitioners (
-              id,
-              full_name,
-              qualifications,
-              specializations
-            ),
-            emr_note:emr_notes (
-              chief_complaint,
-              history_present,
-              past_medical_hx,
-              family_history,
-              allergies,
-              current_medications,
-              objective_findings,
-              assessment,
-              plan
-            ),
-            prescriptions (
-              id,
-              dietary_advice,
-              lifestyle_advice,
-              physical_activity,
-              followup_date,
-              prescription_items (
-                id,
-                medicine_name,
-                dose,
-                frequency,
-                duration_days,
-                anupana,
-                special_instructions
-              )
-            )
-          `)
-          .eq("patient_id", cleanId)
-          .order("created_at", { ascending: false });
+  const calendarDays = useMemo(() => {
+    const firstDay = new Date(calendarYear, calendarMonth, 1);
+    let startDayOfWeek = firstDay.getDay();
+    startDayOfWeek = startDayOfWeek === 0 ? 6 : startDayOfWeek - 1;
 
-        if (dbConsults && dbConsults.length > 0) {
-          const formattedVisits: VisitRecord[] = dbConsults.map((c: any) => {
-            const dateStr = c.appointment?.scheduled_date
-              ? new Date(c.appointment.scheduled_date).toLocaleDateString("en-US", { day: "numeric", month: "short", year: "numeric" })
-              : new Date(c.created_at).toLocaleDateString("en-US", { day: "numeric", month: "short", year: "numeric" });
+    const totalDays = new Date(calendarYear, calendarMonth + 1, 0).getDate();
 
-            const timeStr = c.appointment?.scheduled_time ? formatTime(c.appointment.scheduled_time) : "N/A";
+    const days = [];
+    for (let i = 0; i < startDayOfWeek; i++) {
+      days.push(null);
+    }
 
-            const medications = c.prescriptions?.[0]?.prescription_items?.map((item: any) => ({
-              name: item.medicine_name,
-              dose: item.dose,
-              frequency: item.frequency,
-              anupana: item.anupana || "",
-              system: c.practitioner?.specializations?.[0] || "Ayurveda"
-            })) || [];
+    for (let day = 1; day <= totalDays; day++) {
+      const yearStr = calendarYear;
+      const monthStr = String(calendarMonth + 1).padStart(2, "0");
+      const dayStr = String(day).padStart(2, "0");
+      const dateStr = `${yearStr}-${monthStr}-${dayStr}`;
 
-            // Parse SOAP
-            const emr = c.emr_note || {};
-            const soap = {
-              S: emr.history_present || "No subjective notes",
-              O: emr.objective_findings || "No objective notes",
-              A: emr.assessment || "No assessment notes",
-              P: emr.plan || "No plan notes"
-            };
+      days.push({
+        day,
+        dateStr,
+      });
+    }
 
-            // Parse vitals if they are inside objective findings as text/json
-            let vitals = null;
-            if (emr.objective_findings) {
-              try {
-                if (emr.objective_findings.trim().startsWith("{")) {
-                  const parsed = JSON.parse(emr.objective_findings);
-                  if (parsed.bpSys || parsed.pulse) {
-                    vitals = {
-                      bpSys: parsed.bpSys || 120,
-                      bpDia: parsed.bpDia || 80,
-                      pulse: parsed.pulse || 72,
-                      temp: parsed.temp || 98.6,
-                      spo2: parsed.spo2 || 98,
-                      rr: parsed.rr || 16,
-                      weight: parsed.weight || 70,
-                      height: parsed.height || 170
-                    };
-                  }
-                }
-              } catch (e) {
-                // Ignore parsing errors
-              }
-            }
+    return days;
+  }, [calendarMonth, calendarYear]);
 
-            const docName = c.practitioner?.full_name || "Unknown Practitioner";
-            const initials = docName.split(" ").filter((w: string) => w).map((w: string) => w[0]).join("").slice(0, 2).toUpperCase();
+  const monthName = new Date(calendarYear, calendarMonth).toLocaleDateString("en-IN", {
+    month: "long",
+    year: "numeric"
+  });
 
-            return {
-              id: c.id,
-              date: dateStr,
-              time: timeStr,
-              duration: "20 min",
-              mode: c.mode || "clinic",
-              doctor: docName,
-              specialty: c.practitioner?.specializations?.[0] || "Ayurveda",
-              doctorInitials: initials,
-              isYou: false,
-              chiefComplaint: emr.chief_complaint || "Routine consultation",
-              soap,
-              diagnosis: emr.assessment || "Routine check-up",
-              vitals,
-              medications,
-              investigations: [],
-              referrals: [],
-              followUpDate: c.prescriptions?.[0]?.followup_date || null,
-              followUpInstructions: c.prescriptions?.[0]?.lifestyle_advice || "",
-              type: "initial"
-            };
-          });
+  const nextMonth = () => {
+    if (calendarMonth === 11) {
+      setCalendarMonth(0);
+      setCalendarYear(calendarYear + 1);
+    } else {
+      setCalendarMonth(calendarMonth + 1);
+    }
+  };
 
-          setVisits(formattedVisits);
-          setExpandedVisit(formattedVisits[0].id);
-
-          // Build vitals history from visits that have vitals
-          const vitalsList = formattedVisits
-            .filter(v => v.vitals)
-            .map(v => ({
-              date: v.date,
-              doctor: v.doctor,
-              doctorInitials: v.doctorInitials,
-              isYou: v.isYou,
-              ...v.vitals!
-            }));
-          
-          if (vitalsList.length > 0) {
-            setVitalsHistory(vitalsList);
-          }
-
-          // Build active medications from recent visit prescriptions
-          const activeMeds = formattedVisits.flatMap(v => 
-            v.medications.map(m => {
-              const sysVal = m.system;
-              const system = (["Ayurveda", "Naturopathy", "Siddha", "Homeopathy", "Allopathic", "OTC"].includes(sysVal)
-                ? sysVal
-                : "Ayurveda") as "Ayurveda" | "Naturopathy" | "Siddha" | "Homeopathy" | "Allopathic" | "OTC";
-              return {
-                name: m.name,
-                dose: m.dose,
-                frequency: m.frequency,
-                system: system,
-                prescribedBy: v.doctor,
-                since: v.date,
-                active: true
-              };
-            })
-          );
-
-          if (activeMeds.length > 0) {
-            setMedHistory((prev: any) => ({
-              ...prev,
-              medications: activeMeds
-            }));
-          }
-
-          // Build care team from doctors visited
-          const team = Array.from(new Set(formattedVisits.map(v => v.doctor))).map(name => {
-            const visit = formattedVisits.find(v => v.doctor === name)!;
-            return {
-              id: visit.id,
-              name: name,
-              initials: visit.doctorInitials,
-              specialty: visit.specialty,
-              qualification: "Registered Practitioner",
-              hprId: "HPR-VERIFIED",
-              since: formattedVisits[formattedVisits.length - 1].date,
-              lastVisit: visit.date,
-              nextFollowUp: visit.followUpDate || "N/A",
-              totalRx: visit.medications.length,
-              isYou: visit.isYou
-            };
-          });
-
-          setCareTeam(team);
-        }
-
-      } catch (err) {
-        console.error("Error loading patient details:", err);
-      } finally {
-        setIsLoading(false);
+  const prevMonth = () => {
+    const today = new Date();
+    if (calendarYear > today.getFullYear() || (calendarYear === today.getFullYear() && calendarMonth > today.getMonth())) {
+      if (calendarMonth === 0) {
+        setCalendarMonth(11);
+        setCalendarYear(calendarYear - 1);
+      } else {
+        setCalendarMonth(calendarMonth - 1);
       }
     }
-    loadData();
-  }, [id]);
+  };
 
-  const statStyle = { normal: "bg-herb-green/10 text-herb-green border-herb-green/20", warning: "bg-amber-50 text-amber-700 border-amber-200", alert: "bg-red-50 text-red-600 border-red-200" };
+  const [isSaved, setIsSaved] = useState(false);
+  const [isSaving, setIsSaving] = useState(false);
+
+  // Sync vitals.weight with header weight input
+  useEffect(() => {
+    if (weight !== "") {
+      setVitals(v => {
+        const bmi = (weight && height) ? (Number(weight) / Math.pow(Number(height) / 100, 2)).toFixed(1) : "";
+        return { ...v, weight: String(weight), bmi };
+      });
+    }
+  }, [weight, height]);
+
+  // Sync vitals weight change back to header weight
+  const handleVitalsWeightChange = (val: string) => {
+    setVitals(v => {
+      const bmi = (val && height) ? (Number(val) / Math.pow(Number(height) / 100, 2)).toFixed(1) : "";
+      return { ...v, weight: val, bmi };
+    });
+    if (val !== "") {
+      setWeight(Number(val));
+    } else {
+      setWeight("");
+    }
+  };
+
+  // Run once data is loaded to populate values from latest checked record
+  const [hasInitialized, setHasInitialized] = useState(false);
+
+  useEffect(() => {
+    if (intakeData && !hasInitialized) {
+      const pat = intakeData.patient;
+      const latestVisit = intakeData.visits?.[0] as any;
+
+      if (pat) {
+        setHeight(pat.height || "");
+        setWeight(pat.weight || "");
+        setBloodGroup(pat.bloodGroup || "O+");
+        setAddress(pat.address || "");
+      }
+
+      if (latestVisit) {
+        setVisitReason(latestVisit.visitReason || "");
+        setChiefComplaints(latestVisit.chiefComplaints || []);
+        setPresentIllness(latestVisit.soap?.S || "");
+        setPreviousHistory(latestVisit.previousHistory || "");
+        setPreviousCalls(latestVisit.previousCalls || "");
+
+        const v = (latestVisit.vitals as any) || {};
+        setVitals({
+          bpSys: v.bpSys || "",
+          bpDia: v.bpDia || "",
+          pulse: v.pulse || "",
+          temp: v.temp || "",
+          spo2: v.spo2 || "",
+          weight: v.weight || pat?.weight || "",
+          bmi: (v.weight && v.height) ? (v.weight / Math.pow(v.height / 100, 2)).toFixed(1) : "",
+        });
+
+        if (latestVisit.medications && latestVisit.medications.length > 0) {
+          setMedicines(latestVisit.medications.map((m: any, idx: number) => ({
+            id: m.id || idx,
+            name: m.name || "",
+            form: m.form || "Tablet",
+            dose: m.dose || "",
+            frequency: m.frequency || "Morning",
+            timing: m.timing || "After Food",
+            duration: m.duration || "",
+            instructions: m.instructions || ""
+          })));
+        }
+
+        const rawInstructions = latestVisit.followUpInstructions || "";
+        const match = rawInstructions.match(/\[Upcoming Session Fixed: (.*?) at (.*?)\]/);
+
+        if (match) {
+          setUpcomingCallDate(match[1]);
+          setUpcomingCallTime(match[2]);
+          setIsUpcomingVisible(true);
+          const cleanInstructions = rawInstructions.replace(/\[Upcoming Session Fixed: .*?\]/g, "").trim();
+          setPrescriptionNotes(cleanInstructions);
+          setFollowUpInstructions(cleanInstructions);
+          if (editorRef.current) {
+            editorRef.current.innerHTML = cleanInstructions;
+          }
+        } else {
+          setPrescriptionNotes(rawInstructions);
+          setFollowUpInstructions(rawInstructions);
+          if (editorRef.current) {
+            editorRef.current.innerHTML = rawInstructions || "<ul><li>Continue medicines regularly.</li><li>Take with warm water.</li><li>Follow prescribed diet.</li><li>Return after 15 days.</li></ul>";
+          }
+        }
+      }
+      setHasInitialized(true);
+    }
+  }, [intakeData, hasInitialized]);
+
+  const handleAddMedicine = () => {
+    setMedicines([...medicines, { id: Date.now(), name: "", form: "Tablet", dose: "", frequency: "Morning", timing: "After Food", duration: "", instructions: "" }]);
+  };
+
+  const handleRemoveMedicine = (id: number) => {
+    setMedicines(medicines.filter(m => m.id !== id));
+  };
+
+  const handleMedicineChange = (id: number, field: string, value: string) => {
+    setMedicines(medicines.map(m => m.id === id ? { ...m, [field]: value } : m));
+  };
+
+  const handleSaveConsultation = async () => {
+    setIsSaving(true);
+    try {
+      const reportUrls: string[] = [];
+      const reportNames: string[] = [];
+
+      const supabaseClient = createClient();
+      for (const file of uploadedFiles) {
+        const fileExt = file.name.split('.').pop();
+        const fileName = `${id}/${Date.now()}_${Math.random().toString(36).substring(7)}.${fileExt}`;
+        const { data, error } = await supabaseClient.storage.from('patient-reports').upload(fileName, file);
+        if (error) {
+          console.error("Error uploading file:", error);
+        } else if (data) {
+          const { data: { publicUrl } } = supabaseClient.storage.from('patient-reports').getPublicUrl(data.path);
+          reportUrls.push(publicUrl);
+          reportNames.push(file.name);
+        }
+      }
+
+      const consultationData = {
+        practitionerId: user?.id || "",
+        patientId: id,
+        visitReason,
+        chiefComplaints,
+        presentIllness,
+        previousHistory,
+        previousCalls,
+        vitals: {
+          ...vitals,
+          height,
+          weight
+        },
+        bloodGroup,
+        address,
+        medicines,
+        prescriptionNotes,
+        followUpInstructions: upcomingCallDate && upcomingCallTime
+          ? `[Upcoming Session Fixed: ${upcomingCallDate} at ${upcomingCallTime}]\n\n${followUpInstructions}`
+          : followUpInstructions,
+        upcomingCallDate: upcomingCallDate || undefined,
+        upcomingCallTime: upcomingCallTime || undefined,
+        upcomingCallMode: upcomingCallDate && upcomingCallTime ? upcomingCallMode : undefined,
+        reportUrls,
+        reportNames
+      };
+
+      const result = await saveCompleteConsultation(consultationData);
+
+      if (result.success) {
+        setIsSaved(true);
+        setTimeout(() => {
+          window.location.href = `/pro/prescriptions?patientName=${encodeURIComponent(patient?.name || "")}`;
+        }, 1200);
+      } else {
+        alert("Failed to save consultation: " + result.error);
+      }
+    } catch (err: any) {
+      alert("Failed to save consultation: " + err.message);
+    } finally {
+      setIsSaving(false);
+    }
+  };
+  const addComplaint = (e: React.KeyboardEvent<HTMLInputElement>) => {
+    if (e.key === 'Enter' && complaintInput.trim() !== '') {
+      e.preventDefault();
+      if (!chiefComplaints.includes(complaintInput.trim())) {
+        setChiefComplaints([...chiefComplaints, complaintInput.trim()]);
+      }
+      setComplaintInput("");
+    }
+  };
+
+  const removeComplaint = (complaint: string) => {
+    setChiefComplaints(chiefComplaints.filter(c => c !== complaint));
+  };
+
+  if (error) {
+    return (
+      <div className="flex flex-col items-center justify-center min-h-[400px] text-center p-8 bg-white rounded-2xl border border-rose-100 shadow-sm max-w-lg mx-auto mt-20">
+        <div className="text-rose-500 font-bold text-lg mb-2">Error Loading Patient Data</div>
+        <p className="text-slate-500 text-sm mb-4">{error}</p>
+        <div className="text-xs text-slate-400 bg-slate-50 p-4 rounded-lg text-left font-mono mb-4 leading-relaxed">
+          Please verify that you have run the database migration script in your Supabase SQL Editor.
+          The script is located at: supabase/migrations/20260706000000_add_patient_vitals_columns.sql
+        </div>
+        <button onClick={() => window.location.reload()} className="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg text-sm font-semibold transition-colors">
+          Retry
+        </button>
+      </div>
+    );
+  }
 
   if (isLoading || !patient) {
     return (
       <div className="flex items-center justify-center min-h-[400px]">
-        <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-herb-green"></div>
+        <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-indigo-600"></div>
       </div>
     );
   }
 
   return (
-    <div className="px-4 sm:px-6 lg:px-8 py-6 max-w-7xl mx-auto">
-      <div className="flex items-center gap-2 text-xs text-muted-foreground mb-5">
-        <Link href="/pro" className="hover:text-foreground transition-colors">Dashboard</Link>
-        <span>/</span>
-        <span className="text-foreground font-medium">{patient.name}</span>
-      </div>
-
-      <div className="bg-white rounded-2xl border border-border p-6 mb-6">
-        <div className="flex items-start justify-between gap-4 flex-wrap">
-          <div className="flex items-start gap-4">
-            <div className="w-14 h-14 rounded-2xl bg-sage/20 flex items-center justify-center flex-shrink-0">
-              <span className="font-bold text-sage text-xl">{patient.name[0]}</span>
-            </div>
-            <div>
-              <h1 className="font-display text-lg font-semibold text-foreground">{patient.name}</h1>
-              <p className="text-sm text-muted-foreground mt-0.5">
-                {patient.age}y · {patient.gender} · {patient.prakriti} Prakriti
-              </p>
-              <p className="text-xs text-muted-foreground mt-0.5">{patient.phone}</p>
-              {patient.abha ? (
-                <p className="text-xs text-herb-green mt-1">ABHA ✓ · {patient.abha}</p>
-              ) : (
-                <p className="text-xs text-amber-600 mt-1">ABHA not linked</p>
-              )}
-            </div>
-          </div>
-          <div className="flex items-center gap-2 flex-wrap">
-            <div className="flex items-center gap-1.5 text-xs bg-amber-50 text-amber-700 px-3 py-1.5 rounded-lg border border-amber-100">
-              <span>{patient.mode === "video" ? "📹" : "🏥"}</span>
-              <span className="font-medium">
-                {patient.mode === "video" ? "Video" : "In-Clinic"} · {patient.time}
-              </span>
-            </div>
-            <Link href={`/pro/emr?patient=${id}`}>
-              <button className="px-4 py-2 bg-herb-green text-white text-xs font-semibold rounded-xl hover:bg-herb-green/90 transition-all">
-                Open EMR
-              </button>
-            </Link>
-            {patient.mode === "video" && (
-              <Link href="/consult">
-                <button className="px-4 py-2 bg-clinical-dark text-white text-xs font-semibold rounded-xl hover:opacity-90 transition-all">
-                  📹 Start Call
-                </button>
-              </Link>
-            )}
+    <div className="min-h-screen bg-[#F8FAFC] pb-24">
+      {/* Header */}
+      <div className="sticky top-0 z-40 bg-white/80 backdrop-blur-xl border-b border-gray-200 px-6 py-4 flex items-center justify-between mb-10 shadow-sm">
+        <div className="flex items-center gap-2 text-sm text-gray-500 font-medium">
+          <Link href="/pro/patients" className="hover:text-indigo-600 transition-colors">Patients</Link>
+          <span className="text-gray-300">/</span>
+          <span className="text-gray-900">Consultation: {patient.name}</span>
+        </div>
+        <div className="flex items-center gap-4">
+          <div className="w-9 h-9 rounded-full bg-gradient-to-tr from-indigo-500 to-purple-500 flex items-center justify-center text-white font-bold shadow-md ring-2 ring-white">
+            {patient.name[0]}
           </div>
         </div>
       </div>
 
-      <div className="flex gap-1 bg-muted rounded-xl p-1 mb-6 w-fit flex-wrap">
-        {(["intake", "vitals", "medical-history", "history", "care-team", "reports"] as Tab[]).map((tab) => (
-          <button
-            key={tab}
-            onClick={() => setActiveTab(tab)}
-            className={cn(
-              "px-4 py-2 text-sm font-medium rounded-lg transition-all",
-              activeTab === tab ? "bg-white text-foreground shadow-sm" : "text-muted-foreground hover:text-foreground"
-            )}
-          >
-            {tab === "intake" ? "Intake" : tab === "vitals" ? "Vitals" : tab === "medical-history" ? "Med History" : tab === "history" ? "Visits" : tab === "care-team" ? "Care Team" : "Reports"}
-            {tab === "care-team" && careTeam.length > 1 && (
-              <span className={cn("ml-1.5 text-[10px] font-bold px-1.5 py-0.5 rounded-full", activeTab === tab ? "bg-herb-green/10 text-herb-green" : "bg-background text-muted-foreground")}>
-                {careTeam.length}
-              </span>
-            )}
-          </button>
-        ))}
-      </div>
+      <div className="max-w-[1200px] mx-auto px-6">
+        
+        {/* Section 1: Patient Details (Read Only) */}
+        <div className="bg-white rounded-[16px] border border-[#E5E7EB] shadow-[0_2px_8px_rgba(0,0,0,0.04)] p-8 mb-8 flex flex-col lg:flex-row gap-8">
+          {/* Left Side: Identity Card */}
+          <div className="flex flex-col items-center justify-center bg-[#F8FAFC] rounded-2xl p-6 border border-gray-100 lg:w-1/3 min-w-[280px]">
+            <div className="w-24 h-24 rounded-full bg-gradient-to-tr from-indigo-100 to-purple-100 flex items-center justify-center text-indigo-700 font-display font-bold text-4xl shadow-sm mb-4 border-4 border-white">
+              {patient.name[0]}
+            </div>
+            <h2 className="text-2xl font-bold text-gray-900 text-center mb-1">{patient.name}</h2>
+            <p className="text-sm font-mono text-gray-400 bg-white px-3 py-1 rounded-full border border-gray-100 mb-4 shadow-sm">ID: {id.substring(0,8).toUpperCase()}</p>
+            <div className="flex gap-4 text-sm font-medium text-gray-600 bg-white px-6 py-2.5 rounded-xl border border-gray-100 shadow-sm">
+              <span className="flex items-center gap-1.5"><Calendar className="w-4 h-4 text-indigo-400" /> {patient.age}y</span>
+              <div className="w-px h-4 bg-gray-200"></div>
+              <span className="flex items-center gap-1.5"><User className="w-4 h-4 text-purple-400" /> {patient.gender}</span>
+            </div>
+          </div>
 
-      {activeTab === "intake" && (
-        <div className="grid grid-cols-1 lg:grid-cols-[1fr_320px] gap-6">
-          <div className="space-y-5">
-            <div className="bg-white rounded-2xl border border-border p-5">
-              <h3 className="font-semibold text-foreground text-sm mb-3">Reason for Visit</h3>
-              <p className="text-sm text-muted-foreground leading-relaxed">{patient.reason}</p>
-              <div className="mt-4 pt-4 border-t border-border">
-                <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-1">Duration</p>
-                <p className="text-sm text-foreground">{patient.duration}</p>
+          {/* Right Side: Elegant Info Cards with Editable Fields */}
+          <div className="flex-1 grid grid-cols-2 md:grid-cols-3 gap-4">
+            {/* Height Card */}
+            <div className="flex items-center gap-4 bg-white border border-gray-100 p-4 rounded-[14px] shadow-sm hover:shadow-md transition-shadow">
+              <div className="w-10 h-10 rounded-full flex items-center justify-center flex-shrink-0 bg-blue-50 text-blue-500">
+                <Activity className="w-5 h-5" />
+              </div>
+              <div className="flex-1">
+                <p className="text-[11px] uppercase tracking-wider font-semibold text-gray-400">Height</p>
+                <div className="flex items-center gap-1 mt-0.5">
+                  <input 
+                    type="number" 
+                    value={height} 
+                    onChange={e => setHeight(e.target.value === "" ? "" : Number(e.target.value))}
+                    className="w-16 bg-transparent font-bold text-gray-800 text-[15px] focus:outline-none focus:border-indigo-500 border-b border-transparent focus:ring-0 p-0" 
+                    placeholder="—"
+                  />
+                  <span className="text-[13px] font-semibold text-gray-500">cm</span>
+                </div>
               </div>
             </div>
 
-            <div className="bg-white rounded-2xl border border-border p-5">
-              <h3 className="font-semibold text-foreground text-sm mb-3">Self-Reported Symptoms</h3>
-              <div className="flex flex-wrap gap-2">
-                {patient.symptoms.map((s: string) => (
-                  <span key={s} className="text-xs px-3 py-1.5 bg-amber-50 text-amber-700 rounded-full border border-amber-100">
-                    {s}
+            {/* Weight Card */}
+            <div className="flex items-center gap-4 bg-white border border-gray-100 p-4 rounded-[14px] shadow-sm hover:shadow-md transition-shadow">
+              <div className="w-10 h-10 rounded-full flex items-center justify-center flex-shrink-0 bg-emerald-50 text-emerald-500">
+                <Weight className="w-5 h-5" />
+              </div>
+              <div className="flex-1">
+                <p className="text-[11px] uppercase tracking-wider font-semibold text-gray-400">Weight</p>
+                <div className="flex items-center gap-1 mt-0.5">
+                  <input 
+                    type="number" 
+                    value={weight} 
+                    onChange={e => setWeight(e.target.value === "" ? "" : Number(e.target.value))}
+                    className="w-16 bg-transparent font-bold text-gray-800 text-[15px] focus:outline-none focus:border-indigo-500 border-b border-transparent focus:ring-0 p-0" 
+                    placeholder="—"
+                  />
+                  <span className="text-[13px] font-semibold text-gray-500">kg</span>
+                </div>
+              </div>
+            </div>
+
+            {/* Blood Group Card */}
+            <div className="flex items-center gap-4 bg-white border border-gray-100 p-4 rounded-[14px] shadow-sm hover:shadow-md transition-shadow">
+              <div className="w-10 h-10 rounded-full flex items-center justify-center flex-shrink-0 bg-red-50 text-red-500">
+                <Droplets className="w-5 h-5" />
+              </div>
+              <div className="flex-1">
+                <p className="text-[11px] uppercase tracking-wider font-semibold text-gray-400">Blood Group</p>
+                <select 
+                  value={bloodGroup} 
+                  onChange={e => setBloodGroup(e.target.value)}
+                  className="w-full bg-transparent font-bold text-gray-800 text-[15px] focus:outline-none focus:border-indigo-500 border-b border-transparent focus:ring-0 p-0"
+                >
+                  <option value="A+">A+</option>
+                  <option value="A-">A-</option>
+                  <option value="B+">B+</option>
+                  <option value="B-">B-</option>
+                  <option value="AB+">AB+</option>
+                  <option value="AB-">AB-</option>
+                  <option value="O+">O+</option>
+                  <option value="O-">O-</option>
+                </select>
+              </div>
+            </div>
+
+            {/* Contact Card */}
+            <div className="flex items-center gap-4 bg-white border border-gray-100 p-4 rounded-[14px] shadow-sm hover:shadow-md transition-shadow">
+              <div className="w-10 h-10 rounded-full flex items-center justify-center flex-shrink-0 bg-indigo-50 text-indigo-500">
+                <Phone className="w-5 h-5" />
+              </div>
+              <div>
+                <p className="text-[11px] uppercase tracking-wider font-semibold text-gray-400">Contact</p>
+                <p className="text-[15px] font-bold text-gray-800 mt-0.5">{patient.phone || "—"}</p>
+              </div>
+            </div>
+
+            {/* Prakriti Card */}
+            <div className="flex items-center gap-4 bg-white border border-gray-100 p-4 rounded-[14px] shadow-sm hover:shadow-md transition-shadow">
+              <div className="w-10 h-10 rounded-full flex items-center justify-center flex-shrink-0 bg-purple-50 text-purple-500">
+                <Wind className="w-5 h-5" />
+              </div>
+              <div>
+                <p className="text-[11px] uppercase tracking-wider font-semibold text-gray-400">Prakriti</p>
+                <p className="text-[15px] font-bold text-gray-800 mt-0.5">{patient.prakriti || "Vata-Pitta"}</p>
+              </div>
+            </div>
+
+            {/* Address Card */}
+            <div className="flex items-center gap-4 bg-white border border-gray-100 p-4 rounded-[14px] shadow-sm hover:shadow-md transition-shadow col-span-2 md:col-span-1">
+              <div className="w-10 h-10 rounded-full flex items-center justify-center flex-shrink-0 bg-orange-50 text-orange-500">
+                <MapPin className="w-5 h-5" />
+              </div>
+              <div className="flex-1">
+                <p className="text-[11px] uppercase tracking-wider font-semibold text-gray-400">Address</p>
+                <input 
+                  type="text" 
+                  value={address} 
+                  onChange={e => setAddress(e.target.value)}
+                  className="w-full bg-transparent font-bold text-gray-800 text-[15px] focus:outline-none focus:border-indigo-500 border-b border-transparent focus:ring-0 p-0" 
+                  placeholder="Enter address"
+                />
+              </div>
+            </div>
+          </div>
+        </div>
+        <SectionCard title="Consultation Details" icon={Stethoscope}>
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-x-8 gap-y-6 mb-8">
+            <div>
+              <label className="block text-sm font-semibold text-gray-700 mb-2">Visit Reason</label>
+              <input 
+                type="text"
+                placeholder="e.g. Follow up"
+                value={visitReason} onChange={e => setVisitReason(e.target.value)}
+                className="w-full bg-[#F8FAFC] border border-gray-200 rounded-[12px] px-4 py-3 text-sm focus:ring-2 focus:ring-indigo-100 focus:border-indigo-400 outline-none transition-all shadow-sm"
+              />
+            </div>
+            
+            <div className="lg:col-span-2">
+              <label className="block text-sm font-semibold text-gray-700 mb-2">Detailed Reasons <span className="text-gray-400 font-normal text-xs ml-1">(Press Enter to add)</span></label>
+              <div className="flex flex-wrap gap-2 items-center bg-[#F8FAFC] border border-gray-200 rounded-[12px] px-3 py-2 min-h-[48px] focus-within:ring-2 focus-within:ring-indigo-100 focus-within:border-indigo-400 transition-all shadow-sm">
+                {chiefComplaints.map(c => (
+                  <span key={c} className="flex items-center gap-1.5 bg-white border border-gray-200 text-gray-700 px-3 py-1.5 rounded-lg text-xs font-semibold shadow-sm">
+                    {c}
+                    <button onClick={() => removeComplaint(c)} className="text-gray-400 hover:text-red-500 transition-colors"><Trash2 className="w-3.5 h-3.5" /></button>
                   </span>
                 ))}
+                <input 
+                  type="text" 
+                  value={complaintInput} 
+                  onChange={e => setComplaintInput(e.target.value)}
+                  onKeyDown={addComplaint}
+                  className="flex-1 min-w-[150px] outline-none text-sm bg-transparent px-2"
+                  placeholder="e.g. Joint pain, Headaches..."
+                />
               </div>
             </div>
 
-            <div className="bg-white rounded-2xl border border-border p-5">
-              <h3 className="font-semibold text-foreground text-sm mb-3">Current Medications</h3>
-              <p className="text-sm text-muted-foreground">None reported · Patient denies allopathic medication use</p>
+            <div>
+              <label className="block text-sm font-semibold text-gray-700 mb-2">Previous History</label>
+              <input 
+                type="text"
+                placeholder="e.g. Hypertension"
+                value={previousHistory} onChange={e => setPreviousHistory(e.target.value)}
+                className="w-full bg-[#F8FAFC] border border-gray-200 rounded-[12px] px-4 py-3 text-sm focus:ring-2 focus:ring-indigo-100 focus:border-indigo-400 outline-none transition-all shadow-sm"
+              />
             </div>
 
-            <div className="bg-white rounded-2xl border border-border p-5">
-              <h3 className="font-semibold text-foreground text-sm mb-3">Known Allergies</h3>
-              <p className="text-sm text-muted-foreground">No known allergies reported</p>
+            <div>
+              <label className="block text-sm font-semibold text-gray-700 mb-2">Previous Calls</label>
+              <input 
+                type="text"
+                placeholder="e.g. 12 June 2026"
+                value={previousCalls} onChange={e => setPreviousCalls(e.target.value)}
+                className="w-full bg-[#F8FAFC] border border-gray-200 rounded-[12px] px-4 py-3 text-sm focus:ring-2 focus:ring-indigo-100 focus:border-indigo-400 outline-none transition-all shadow-sm"
+              />
             </div>
           </div>
 
-          <div className="space-y-4">
-            <div className="bg-white rounded-2xl border border-border p-5">
-              <h3 className="font-semibold text-foreground text-sm mb-3">AYUSH History</h3>
-              <div className="space-y-2">
-                {[
-                  { label: "Prakriti (recorded)", value: patient.prakriti },
-                  { label: "Prior AYUSH treatment", value: "Ayurveda" },
-                  { label: "Panchakarma history", value: "None" },
-                  { label: "Dietary preference", value: "Vegetarian" },
-                ].map((item) => (
-                  <div key={item.label} className="flex justify-between text-xs py-1.5 border-b border-border last:border-0">
-                    <span className="text-muted-foreground">{item.label}</span>
-                    <span className="font-medium text-foreground">{item.value}</span>
-                  </div>
-                ))}
-              </div>
-            </div>
-
-            <div className="bg-ivory-deep rounded-2xl border border-border p-5">
-              <div className="flex items-center justify-between mb-3">
-                <h3 className="font-semibold text-foreground text-sm">Last Recorded Vitals</h3>
-                <button onClick={() => setActiveTab("vitals")} className="text-[10px] text-herb-green font-semibold hover:underline">Full history →</button>
-              </div>
-              <p className="text-[10px] text-muted-foreground mb-2">{latestVitals.date} · {latestVitals.doctor}</p>
-              <div className="space-y-1">
-                {[
-                  { label: "BP",          value: `${latestVitals.bpSys}/${latestVitals.bpDia} mmHg`, key: "bpSys", n: latestVitals.bpSys },
-                  { label: "Pulse",       value: `${latestVitals.pulse} bpm`,                         key: "pulse",  n: latestVitals.pulse },
-                  { label: "Temp",        value: `${latestVitals.temp} °F`,                            key: "temp",   n: latestVitals.temp  },
-                  { label: "SpO₂",        value: `${latestVitals.spo2}%`,                              key: "spo2",   n: latestVitals.spo2  },
-                  { label: "Weight / BMI", value: `${latestVitals.weight} kg · BMI ${bmi(latestVitals.weight, latestVitals.height)}`, key: "weight", n: latestVitals.weight },
-                ].map((v) => {
-                  const st = vStat(v.key, v.n);
-                  return (
-                    <div key={v.label} className="flex justify-between text-xs py-1.5 border-b border-border last:border-0">
-                      <span className="text-muted-foreground">{v.label}</span>
-                      <span className={cn("font-medium", st === "warning" ? "text-amber-600" : st === "alert" ? "text-red-500" : "text-foreground")}>{v.value}</span>
-                    </div>
-                  );
-                })}
-              </div>
-            </div>
-
-            <div className="bg-white rounded-2xl border border-border p-5">
-              <h3 className="font-semibold text-foreground text-sm mb-3">AI Intake Summary</h3>
-              <p className="text-xs text-muted-foreground leading-relaxed">
-                Patient reports {patient.symptoms.slice(0, 2).join(" and ").toLowerCase()} as primary concerns.
-                Based on self-reported symptoms and {patient.prakriti} Prakriti profile, this appears consistent with a Vata aggravation pattern.
-              </p>
-              <p className="text-[10px] text-muted-foreground mt-2">ⓘ AI summary — verify clinically. Not a diagnosis.</p>
-            </div>
+          <div>
+            <label className="block text-sm font-semibold text-gray-700 mb-2">History of Present Illness</label>
+            <textarea 
+              value={presentIllness} onChange={e => setPresentIllness(e.target.value)}
+              rows={4}
+              placeholder="Detail the progression of symptoms..."
+              className="w-full bg-[#F8FAFC] border border-gray-200 rounded-[12px] px-4 py-3 text-sm focus:ring-2 focus:ring-indigo-100 focus:border-indigo-400 outline-none transition-all resize-none shadow-sm"
+            />
           </div>
-        </div>
-      )}
+        </SectionCard>
 
-      {activeTab === "vitals" && (
-        <div className="space-y-5">
-          {/* Key vitals — latest reading highlight cards */}
-          <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+        {/* Section 3: Recorded Vitals */}
+        <SectionCard title="Recorded Vitals" icon={Activity}>
+          <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-7 gap-6 mb-6">
             {[
-              { label: "Blood Pressure", value: `${latestVitals.bpSys}/${latestVitals.bpDia}`, unit: "mmHg", key: "bpSys", icon: "🩺", prev: prevVitals ? `${prevVitals.bpSys}/${prevVitals.bpDia}` : null, trendVal: prevVitals ? { curr: latestVitals.bpSys, prev: prevVitals.bpSys, pos: "down" as const } : null },
-              { label: "Pulse",         value: `${latestVitals.pulse}`, unit: "bpm",   key: "pulse", icon: "💓", prev: prevVitals ? String(prevVitals.pulse) : null, trendVal: prevVitals ? { curr: latestVitals.pulse, prev: prevVitals.pulse, pos: "down" as const } : null },
-              { label: "SpO₂",          value: `${latestVitals.spo2}`, unit: "%",    key: "spo2",  icon: "🫁", prev: prevVitals ? String(prevVitals.spo2) : null, trendVal: prevVitals ? { curr: latestVitals.spo2, prev: prevVitals.spo2, pos: "up" as const } : null },
-              { label: "BMI",           value: bmi(latestVitals.weight, latestVitals.height), unit: "", key: "bmi",   icon: "⚖️", prev: prevVitals ? bmi(prevVitals.weight, prevVitals.height) : null, trendVal: prevVitals ? { curr: latestVitals.weight, prev: prevVitals.weight, pos: "down" as const } : null },
-            ].map(v => {
-              const st = v.key === "bmi"
-                ? (parseFloat(v.value) < 18.5 ? "warning" : parseFloat(v.value) < 25 ? "normal" : parseFloat(v.value) < 30 ? "warning" : "alert")
-                : vStat(v.key, parseFloat(v.value));
-              const tr = v.trendVal ? trend(v.trendVal.curr, v.trendVal.prev, v.trendVal.pos) : null;
-              return (
-                <div key={v.label} className={cn("rounded-2xl border p-4", statStyle[st])}>
-                  <div className="flex items-start justify-between mb-2">
-                    <span className="text-lg">{v.icon}</span>
-                    {tr && <span className={cn("text-sm font-bold", tr.color)}>{tr.arrow}</span>}
-                  </div>
-                  <p className="text-xl font-bold font-display">{v.value}<span className="text-xs font-normal ml-1">{v.unit}</span></p>
-                  <p className="text-[10px] font-semibold mt-0.5 uppercase tracking-wider">{v.label}</p>
-                  {v.prev && <p className="text-[10px] mt-1 opacity-70">Prev: {v.prev}{v.unit}</p>}
-                </div>
-              );
-            })}
-          </div>
-
-          {/* Latest full reading detail */}
-          <div className="bg-white rounded-2xl border border-border p-5">
-            <div className="flex items-center justify-between mb-4">
-              <div>
-                <h3 className="font-semibold text-foreground text-sm">Latest Reading</h3>
-                <p className="text-xs text-muted-foreground mt-0.5">{latestVitals.date} · Recorded by {latestVitals.doctor}</p>
-              </div>
-              <span className={cn("text-[10px] font-semibold px-2 py-0.5 rounded-full border", latestVitals.isYou ? "bg-herb-green text-white border-herb-green" : "bg-muted text-muted-foreground border-border")}>
-                {latestVitals.isYou ? "You" : latestVitals.doctorInitials}
-              </span>
-            </div>
-            <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-              {[
-                { label: "BP Systolic",  value: latestVitals.bpSys,  unit: "mmHg", key: "bpSys" },
-                { label: "BP Diastolic", value: latestVitals.bpDia,  unit: "mmHg", key: "bpDia" },
-                { label: "Pulse Rate",   value: latestVitals.pulse,   unit: "bpm",  key: "pulse" },
-                { label: "Temperature",  value: latestVitals.temp,    unit: "°F",   key: "temp"  },
-                { label: "SpO₂",         value: latestVitals.spo2,    unit: "%",    key: "spo2"  },
-                { label: "Resp. Rate",   value: latestVitals.rr,      unit: "/min", key: "rr"    },
-                { label: "Weight",       value: latestVitals.weight,  unit: "kg",   key: "weight"},
-                { label: "Height",       value: latestVitals.height,  unit: "cm",   key: "height"},
-              ].map(f => {
-                const st = vStat(f.key, f.value);
-                return (
-                  <div key={f.label} className={cn("rounded-xl border p-3 text-center", statStyle[st])}>
-                    <p className="text-sm font-bold">{f.value}<span className="text-[10px] font-normal ml-0.5">{f.unit}</span></p>
-                    <p className="text-[10px] mt-0.5">{f.label}</p>
-                  </div>
-                );
-              })}
-            </div>
-          </div>
-
-          {/* Historical vitals table */}
-          <div className="bg-white rounded-2xl border border-border overflow-hidden">
-            <div className="px-5 py-4 border-b border-border flex items-center justify-between">
-              <h3 className="font-semibold text-foreground text-sm">Vitals History</h3>
-              <span className="text-xs text-muted-foreground">{vitalsHistory.length} records</span>
-            </div>
-            <div className="overflow-x-auto">
-              <table className="w-full text-xs">
-                <thead>
-                  <tr className="border-b border-border bg-background">
-                    {["Date", "Doctor", "BP (mmHg)", "Pulse", "Temp (°F)", "SpO₂", "RR", "Weight", "BMI"].map(h => (
-                      <th key={h} className="text-left px-4 py-2.5 font-semibold text-muted-foreground uppercase tracking-wider whitespace-nowrap">{h}</th>
-                    ))}
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-border">
-                  {vitalsHistory.map((v, i) => {
-                    const prev = vitalsHistory[i + 1];
-                    const bpT   = prev ? trend(v.bpSys, prev.bpSys, "down")   : null;
-                    const pulT  = prev ? trend(v.pulse, prev.pulse, "down")    : null;
-                    const spo2T = prev ? trend(v.spo2,  prev.spo2,  "up")     : null;
-                    const wtT   = prev ? trend(v.weight, prev.weight, "down")  : null;
-                    const vBmi  = bmi(v.weight, v.height);
-                    const bmiSt = parseFloat(vBmi) < 18.5 ? "warning" : parseFloat(vBmi) < 25 ? "normal" : parseFloat(vBmi) < 30 ? "warning" : "alert";
-                    return (
-                      <tr key={i} className={cn("transition-colors hover:bg-background", i === 0 ? "bg-herb-green/3" : "")}>
-                        <td className="px-4 py-3 font-medium text-foreground whitespace-nowrap">
-                          {v.date}
-                          {i === 0 && <span className="ml-2 text-[9px] bg-herb-green text-white px-1.5 py-0.5 rounded-full font-bold">Latest</span>}
-                        </td>
-                        <td className="px-4 py-3 whitespace-nowrap">
-                          <div className="flex items-center gap-1.5">
-                            <div className={cn("w-5 h-5 rounded-md flex items-center justify-center text-[9px] font-bold", v.isYou ? "bg-herb-gradient text-white" : "bg-muted text-foreground")}>
-                              {v.doctorInitials}
-                            </div>
-                            <span className="text-muted-foreground">{v.doctor.replace("Dr. ", "")}</span>
-                          </div>
-                        </td>
-                        <td className="px-4 py-3 whitespace-nowrap">
-                          <span className={cn("font-semibold px-2 py-0.5 rounded-md text-[11px] border", statStyle[vStat("bpSys", v.bpSys)])}>
-                            {v.bpSys}/{v.bpDia}
-                          </span>
-                          {bpT && <span className={cn("ml-1 text-[10px] font-bold", bpT.color)}>{bpT.arrow}</span>}
-                        </td>
-                        <td className="px-4 py-3 whitespace-nowrap">
-                          <span className={cn("font-semibold px-2 py-0.5 rounded-md text-[11px] border", statStyle[vStat("pulse", v.pulse)])}>
-                            {v.pulse}
-                          </span>
-                          {pulT && <span className={cn("ml-1 text-[10px] font-bold", pulT.color)}>{pulT.arrow}</span>}
-                        </td>
-                        <td className="px-4 py-3">
-                          <span className={cn("font-semibold px-2 py-0.5 rounded-md text-[11px] border", statStyle[vStat("temp", v.temp)])}>
-                            {v.temp}
-                          </span>
-                        </td>
-                        <td className="px-4 py-3 whitespace-nowrap">
-                          <span className={cn("font-semibold px-2 py-0.5 rounded-md text-[11px] border", statStyle[vStat("spo2", v.spo2)])}>
-                            {v.spo2}%
-                          </span>
-                          {spo2T && <span className={cn("ml-1 text-[10px] font-bold", spo2T.color)}>{spo2T.arrow}</span>}
-                        </td>
-                        <td className="px-4 py-3">
-                          <span className={cn("font-semibold px-2 py-0.5 rounded-md text-[11px] border", statStyle[vStat("rr", v.rr)])}>
-                            {v.rr}
-                          </span>
-                        </td>
-                        <td className="px-4 py-3 whitespace-nowrap text-foreground font-medium">
-                          {v.weight} kg
-                          {wtT && <span className={cn("ml-1 text-[10px] font-bold", wtT.color)}>{wtT.arrow}</span>}
-                        </td>
-                        <td className="px-4 py-3">
-                          <span className={cn("font-semibold px-2 py-0.5 rounded-md text-[11px] border", statStyle[bmiSt])}>
-                            {vBmi}
-                          </span>
-                        </td>
-                      </tr>
-                    );
-                  })}
-                </tbody>
-              </table>
-            </div>
-            <div className="px-5 py-3 border-t border-border flex flex-wrap gap-4 text-[10px] text-muted-foreground">
-              <span className="flex items-center gap-1.5"><span className="w-3 h-3 rounded-sm bg-herb-green/20 border border-herb-green/30 inline-block" /> Normal range</span>
-              <span className="flex items-center gap-1.5"><span className="w-3 h-3 rounded-sm bg-amber-50 border border-amber-200 inline-block" /> Borderline</span>
-              <span className="flex items-center gap-1.5"><span className="w-3 h-3 rounded-sm bg-red-50 border border-red-200 inline-block" /> Out of range</span>
-              <span className="flex items-center gap-1.5"><span className="font-bold text-herb-green">↑↓</span> Trend vs previous visit</span>
-            </div>
-          </div>
-
-          {/* Record new vitals CTA */}
-          <Link href={`/pro/emr?patient=${id}`}>
-            <div className="bg-herb-gradient rounded-2xl p-5 flex items-center gap-4 hover:opacity-90 transition-all cursor-pointer">
-              <div className="w-10 h-10 rounded-xl bg-white/20 flex items-center justify-center">
-                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth={2.5}><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
-              </div>
-              <div>
-                <p className="text-sm font-bold text-white">Record Vitals for Today</p>
-                <p className="text-xs text-white/75 mt-0.5">Open EMR to capture this visit's readings</p>
-              </div>
-            </div>
-          </Link>
-        </div>
-      )}
-
-      {activeTab === "medical-history" && (
-        <div className="space-y-4">
-          {/* Allergies */}
-          <div className="bg-white rounded-2xl border border-border overflow-hidden">
-            <button className="w-full flex items-center justify-between px-5 py-3.5 hover:bg-background transition-colors"
-              onClick={() => setOpenMHSection(s => ({ ...s, allergies: !s.allergies }))}>
-              <div className="flex items-center gap-2">
-                <h3 className="font-semibold text-foreground text-sm">Allergies</h3>
-                {medHistory.allergies.some(a => a.severity === "life-threatening" || a.severity === "severe") && (
-                  <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-red-50 text-red-600 border border-red-200">⚠ Critical</span>
-                )}
-                <span className="text-[10px] text-muted-foreground">{medHistory.allergies.length} recorded</span>
-              </div>
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}
-                className={cn("text-muted-foreground transition-transform", openMHSection.allergies ? "rotate-180" : "")}>
-                <polyline points="6 9 12 15 18 9" />
-              </svg>
-            </button>
-            {openMHSection.allergies && (
-              <div className="border-t border-border">
-                {medHistory.allergies.length === 0 ? (
-                  <p className="px-5 py-4 text-xs text-muted-foreground italic">No known allergies (NKDA)</p>
-                ) : (
-                  <div className="divide-y divide-border">
-                    {medHistory.allergies.map((a, i) => (
-                      <div key={i} className="flex items-start gap-3 px-5 py-3.5">
-                        <div className={cn("w-2 h-2 rounded-full mt-1.5 flex-shrink-0",
-                          a.severity === "life-threatening" ? "bg-red-600" : a.severity === "severe" ? "bg-red-400" : a.severity === "moderate" ? "bg-amber-400" : "bg-yellow-300"
-                        )} />
-                        <div className="flex-1">
-                          <div className="flex items-center gap-2 flex-wrap">
-                            <p className="text-sm font-semibold text-foreground">{a.allergen}</p>
-                            <span className="text-[10px] font-medium px-2 py-0.5 rounded-full bg-muted text-muted-foreground capitalize">{a.type}</span>
-                            <span className={cn("text-[10px] font-bold px-2 py-0.5 rounded-full capitalize",
-                              a.severity === "life-threatening" ? "bg-red-100 text-red-700 border border-red-200" :
-                              a.severity === "severe" ? "bg-red-50 text-red-600" :
-                              a.severity === "moderate" ? "bg-amber-50 text-amber-700" : "bg-yellow-50 text-yellow-700"
-                            )}>{a.severity}</span>
-                          </div>
-                          <p className="text-xs text-muted-foreground mt-0.5">Reaction: {a.reaction}</p>
-                          <p className="text-[10px] text-muted-foreground mt-0.5">Since {a.since}</p>
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                )}
-              </div>
-            )}
-          </div>
-
-          {/* Active Medications */}
-          <div className="bg-white rounded-2xl border border-border overflow-hidden">
-            <button className="w-full flex items-center justify-between px-5 py-3.5 hover:bg-background transition-colors"
-              onClick={() => setOpenMHSection(s => ({ ...s, medications: !s.medications }))}>
-              <div className="flex items-center gap-2">
-                <h3 className="font-semibold text-foreground text-sm">Active Medications</h3>
-                <span className="text-[10px] text-muted-foreground">{medHistory.medications.filter(m => m.active).length} active</span>
-              </div>
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}
-                className={cn("text-muted-foreground transition-transform", openMHSection.medications ? "rotate-180" : "")}>
-                <polyline points="6 9 12 15 18 9" />
-              </svg>
-            </button>
-            {openMHSection.medications && (
-              <div className="border-t border-border">
-                <div className="divide-y divide-border">
-                  {medHistory.medications.map((m, i) => (
-                    <div key={i} className={cn("flex items-start gap-3 px-5 py-3.5", !m.active && "opacity-60")}>
-                      <div className={cn("w-2 h-2 rounded-full mt-1.5 flex-shrink-0",
-                        m.active ? (m.system === "Allopathic" ? "bg-blue-400" : "bg-herb-green") : "bg-muted-foreground"
-                      )} />
-                      <div className="flex-1">
-                        <div className="flex items-center gap-2 flex-wrap">
-                          <p className="text-sm font-semibold text-foreground">{m.name}</p>
-                          <span className={cn("text-[10px] font-semibold px-2 py-0.5 rounded-full",
-                            m.system === "Ayurveda"   ? "bg-herb-green/10 text-herb-green" :
-                            m.system === "Homeopathy" ? "bg-blue-50 text-blue-700" :
-                            m.system === "Allopathic" ? "bg-slate-100 text-slate-700" :
-                            m.system === "Siddha"     ? "bg-amber-50 text-amber-700" :
-                            "bg-muted text-muted-foreground"
-                          )}>{m.system}</span>
-                          {!m.active && <span className="text-[10px] text-muted-foreground">(discontinued)</span>}
-                        </div>
-                        <p className="text-xs text-muted-foreground mt-0.5">{m.dose} · {m.frequency}</p>
-                        <p className="text-[10px] text-muted-foreground mt-0.5">By {m.prescribedBy} · since {m.since}</p>
-                      </div>
-                    </div>
-                  ))}
-                </div>
-                {medHistory.medications.some(m => m.system === "Allopathic") && medHistory.medications.some(m => m.system === "Ayurveda" || m.system === "Homeopathy") && (
-                  <div className="px-5 py-3 bg-amber-50 border-t border-amber-100">
-                    <p className="text-[10px] text-amber-700 font-medium">
-                      ⚠ Patient is on concurrent AYUSH + Allopathic medications. Review for interactions before prescribing.
-                    </p>
-                  </div>
-                )}
-              </div>
-            )}
-          </div>
-
-          {/* Past Medical History */}
-          <div className="bg-white rounded-2xl border border-border overflow-hidden">
-            <button className="w-full flex items-center justify-between px-5 py-3.5 hover:bg-background transition-colors"
-              onClick={() => setOpenMHSection(s => ({ ...s, pmh: !s.pmh }))}>
-              <div className="flex items-center gap-2">
-                <h3 className="font-semibold text-foreground text-sm">Past Medical History</h3>
-                <span className="text-[10px] text-muted-foreground">{medHistory.pmh.length} conditions</span>
-              </div>
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}
-                className={cn("text-muted-foreground transition-transform", openMHSection.pmh ? "rotate-180" : "")}>
-                <polyline points="6 9 12 15 18 9" />
-              </svg>
-            </button>
-            {openMHSection.pmh && (
-              <div className="border-t border-border">
-                {medHistory.pmh.length === 0 ? (
-                  <p className="px-5 py-4 text-xs text-muted-foreground italic">No significant past medical history</p>
-                ) : (
-                  <div className="divide-y divide-border">
-                    {medHistory.pmh.map((p, i) => (
-                      <div key={i} className="flex items-start gap-3 px-5 py-3.5">
-                        <div className={cn("w-2 h-2 rounded-full mt-1.5 flex-shrink-0",
-                          p.status === "ongoing" ? "bg-red-400" : p.status === "managed" ? "bg-amber-400" : "bg-herb-green"
-                        )} />
-                        <div className="flex-1">
-                          <div className="flex items-center gap-2 flex-wrap">
-                            <p className="text-sm font-semibold text-foreground">{p.condition}</p>
-                            <span className={cn("text-[10px] font-semibold px-2 py-0.5 rounded-full capitalize",
-                              p.status === "ongoing" ? "bg-red-50 text-red-600" : p.status === "managed" ? "bg-amber-50 text-amber-700" : "bg-herb-green/10 text-herb-green"
-                            )}>{p.status}</span>
-                          </div>
-                          {p.notes && <p className="text-xs text-muted-foreground mt-0.5">{p.notes}</p>}
-                          <p className="text-[10px] text-muted-foreground mt-0.5">Since {p.year}</p>
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                )}
-              </div>
-            )}
-          </div>
-
-          {/* Surgical History */}
-          <div className="bg-white rounded-2xl border border-border overflow-hidden">
-            <button className="w-full flex items-center justify-between px-5 py-3.5 hover:bg-background transition-colors"
-              onClick={() => setOpenMHSection(s => ({ ...s, surgeries: !s.surgeries }))}>
-              <div className="flex items-center gap-2">
-                <h3 className="font-semibold text-foreground text-sm">Surgical / Procedure History</h3>
-                <span className="text-[10px] text-muted-foreground">
-                  {medHistory.surgeries.length === 0 ? "None" : `${medHistory.surgeries.length} procedure${medHistory.surgeries.length !== 1 ? "s" : ""}`}
-                </span>
-              </div>
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}
-                className={cn("text-muted-foreground transition-transform", openMHSection.surgeries ? "rotate-180" : "")}>
-                <polyline points="6 9 12 15 18 9" />
-              </svg>
-            </button>
-            {openMHSection.surgeries && (
-              <div className="border-t border-border">
-                {medHistory.surgeries.length === 0 ? (
-                  <p className="px-5 py-4 text-xs text-muted-foreground italic">No surgical history</p>
-                ) : (
-                  <div className="divide-y divide-border">
-                    {medHistory.surgeries.map((s, i) => (
-                      <div key={i} className="px-5 py-3.5">
-                        <div className="flex items-center gap-2 flex-wrap">
-                          <p className="text-sm font-semibold text-foreground">{s.procedure}</p>
-                          <span className="text-[10px] font-mono text-muted-foreground bg-muted px-1.5 py-0.5 rounded">{s.year}</span>
-                        </div>
-                        <p className="text-xs text-muted-foreground mt-0.5">{s.hospital}</p>
-                        {s.notes && <p className="text-[10px] text-muted-foreground mt-0.5">{s.notes}</p>}
-                      </div>
-                    ))}
-                  </div>
-                )}
-              </div>
-            )}
-          </div>
-
-          {/* Family History */}
-          <div className="bg-white rounded-2xl border border-border overflow-hidden">
-            <button className="w-full flex items-center justify-between px-5 py-3.5 hover:bg-background transition-colors"
-              onClick={() => setOpenMHSection(s => ({ ...s, family: !s.family }))}>
-              <div className="flex items-center gap-2">
-                <h3 className="font-semibold text-foreground text-sm">Family History</h3>
-                <span className="text-[10px] text-muted-foreground">{medHistory.family.length} entries</span>
-              </div>
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}
-                className={cn("text-muted-foreground transition-transform", openMHSection.family ? "rotate-180" : "")}>
-                <polyline points="6 9 12 15 18 9" />
-              </svg>
-            </button>
-            {openMHSection.family && (
-              <div className="border-t border-border">
-                {medHistory.family.length === 0 ? (
-                  <p className="px-5 py-4 text-xs text-muted-foreground italic">No significant family history</p>
-                ) : (
-                  <div className="divide-y divide-border">
-                    {medHistory.family.map((f, i) => (
-                      <div key={i} className="flex items-start gap-3 px-5 py-3.5">
-                        <div className="w-8 h-8 rounded-lg bg-muted flex items-center justify-center flex-shrink-0 mt-0.5">
-                          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.5} className="text-muted-foreground">
-                            <circle cx="12" cy="8" r="4"/><path d="M4 20c0-4 3.6-7 8-7s8 3 8 7"/>
-                          </svg>
-                        </div>
-                        <div>
-                          <div className="flex items-center gap-2 flex-wrap">
-                            <p className="text-sm font-semibold text-foreground">{f.relation}</p>
-                            {f.age && <span className="text-[10px] text-muted-foreground">{f.age}</span>}
-                          </div>
-                          <p className="text-xs text-muted-foreground mt-0.5">{f.condition}</p>
-                          {f.notes && <p className="text-[10px] text-muted-foreground mt-0.5">{f.notes}</p>}
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                )}
-              </div>
-            )}
-          </div>
-
-          {/* Social History */}
-          <div className="bg-white rounded-2xl border border-border overflow-hidden">
-            <button className="w-full flex items-center justify-between px-5 py-3.5 hover:bg-background transition-colors"
-              onClick={() => setOpenMHSection(s => ({ ...s, social: !s.social }))}>
-              <h3 className="font-semibold text-foreground text-sm">Social History</h3>
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}
-                className={cn("text-muted-foreground transition-transform", openMHSection.social ? "rotate-180" : "")}>
-                <polyline points="6 9 12 15 18 9" />
-              </svg>
-            </button>
-            {openMHSection.social && (
-              <div className="border-t border-border px-5 py-4">
-                <div className="grid grid-cols-2 gap-3">
-                  {([
-                    { label: "Occupation",      value: medHistory.social.occupation },
-                    { label: "Marital Status",  value: medHistory.social.marital },
-                    { label: "Tobacco",         value: medHistory.social.tobacco },
-                    { label: "Alcohol",         value: medHistory.social.alcohol },
-                    { label: "Diet",            value: medHistory.social.diet },
-                    { label: "Exercise",        value: medHistory.social.exercise },
-                  ]).map(({ label, value }) => (
-                    <div key={label}>
-                      <p className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">{label}</p>
-                      <p className="text-xs text-foreground mt-0.5">{value}</p>
-                    </div>
-                  ))}
-                </div>
-                {medHistory.social.notes && (
-                  <div className="mt-3 pt-3 border-t border-border">
-                    <p className="text-xs text-muted-foreground leading-relaxed">{medHistory.social.notes}</p>
-                  </div>
-                )}
-              </div>
-            )}
-          </div>
-
-          {/* Immunizations */}
-          <div className="bg-white rounded-2xl border border-border overflow-hidden">
-            <button className="w-full flex items-center justify-between px-5 py-3.5 hover:bg-background transition-colors"
-              onClick={() => setOpenMHSection(s => ({ ...s, immunizations: !s.immunizations }))}>
-              <div className="flex items-center gap-2">
-                <h3 className="font-semibold text-foreground text-sm">Immunizations</h3>
-                {medHistory.immunizations.some(v => v.status === "due") && (
-                  <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-amber-50 text-amber-700 border border-amber-200">Due</span>
-                )}
-              </div>
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}
-                className={cn("text-muted-foreground transition-transform", openMHSection.immunizations ? "rotate-180" : "")}>
-                <polyline points="6 9 12 15 18 9" />
-              </svg>
-            </button>
-            {openMHSection.immunizations && (
-              <div className="border-t border-border divide-y divide-border">
-                {medHistory.immunizations.map((v, i) => (
-                  <div key={i} className="flex items-center justify-between px-5 py-3">
-                    <div className="flex items-center gap-3">
-                      <div className={cn("w-2 h-2 rounded-full flex-shrink-0",
-                        v.status === "complete" ? "bg-herb-green" : v.status === "partial" ? "bg-amber-400" : "bg-red-400"
-                      )} />
-                      <div>
-                        <p className="text-xs font-semibold text-foreground">{v.vaccine}</p>
-                        <p className="text-[10px] text-muted-foreground">{v.doses} doses · {v.date}</p>
-                      </div>
-                    </div>
-                    <span className={cn("text-[10px] font-semibold px-2 py-0.5 rounded-full capitalize",
-                      v.status === "complete" ? "bg-herb-green/10 text-herb-green" :
-                      v.status === "partial"  ? "bg-amber-50 text-amber-700" :
-                      "bg-red-50 text-red-600"
-                    )}>{v.status}</span>
-                  </div>
-                ))}
-              </div>
-            )}
-          </div>
-        </div>
-      )}
-
-      {activeTab === "history" && (
-        <div>
-          {/* Summary bar */}
-          <div className="flex items-center gap-4 flex-wrap bg-white rounded-2xl border border-border px-5 py-3.5 mb-5">
-            <div className="text-center">
-              <p className="font-display text-lg font-bold text-foreground">{visits.length}</p>
-              <p className="text-[10px] text-muted-foreground">Total visits</p>
-            </div>
-            <div className="w-px h-8 bg-border" />
-            <div className="text-center">
-              <p className="font-display text-lg font-bold text-foreground">{visits.filter(v => v.isYou).length}</p>
-              <p className="text-[10px] text-muted-foreground">By you</p>
-            </div>
-            <div className="w-px h-8 bg-border" />
-            <div className="text-center">
-              <p className="font-display text-lg font-bold text-foreground">{[...new Set(visits.map(v => v.doctor))].length}</p>
-              <p className="text-[10px] text-muted-foreground">Doctors</p>
-            </div>
-            <div className="w-px h-8 bg-border" />
-            <div className="flex-1 min-w-0">
-              <p className="text-xs font-semibold text-foreground">
-                {visits[visits.length - 1]?.date} → {visits[0]?.date}
-              </p>
-              <p className="text-[10px] text-muted-foreground mt-0.5">Care timeline</p>
-            </div>
-            <Link href={`/pro/emr?patient=${id}`}>
-              <button className="flex items-center gap-1.5 px-3.5 py-2 bg-herb-green text-white text-xs font-semibold rounded-xl hover:bg-herb-green/90 transition-all flex-shrink-0">
-                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2.5}>
-                  <line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/>
-                </svg>
-                New Visit
-              </button>
-            </Link>
-          </div>
-
-          {/* Timeline */}
-          <div className="relative">
-            {/* Vertical line */}
-            <div className="absolute left-[22px] top-6 bottom-6 w-px bg-border hidden sm:block" />
-
-            <div className="space-y-4">
-              {visits.map((visit, i) => {
-                const isExpanded = expandedVisit === visit.id;
-                const specialtyColor =
-                  visit.specialty === "Ayurveda"   ? "bg-herb-green/10 text-herb-green"   :
-                  visit.specialty === "Homeopathy"  ? "bg-blue-50 text-blue-700"           :
-                  visit.specialty === "Siddha"      ? "bg-amber-50 text-amber-700"         :
-                  visit.specialty === "Naturopathy" ? "bg-teal-50 text-teal-700"           :
-                                                       "bg-muted text-muted-foreground";
-                const typeColor =
-                  visit.type === "initial"  ? "bg-herb-green text-white"   :
-                  visit.type === "urgent"   ? "bg-red-500 text-white"       :
-                  visit.type === "review"   ? "bg-amber-500 text-white"     :
-                                              "bg-muted text-foreground";
-
-                return (
-                  <div key={visit.id} className="flex gap-4 sm:gap-5">
-                    {/* Timeline node */}
-                    <div className="flex-shrink-0 flex flex-col items-center hidden sm:flex">
-                      <div className={cn(
-                        "w-11 h-11 rounded-xl flex items-center justify-center text-xs font-bold z-10 mt-1",
-                        visit.isYou ? "bg-herb-gradient text-white shadow-sm" : "bg-white border-2 border-border text-foreground"
-                      )}>
-                        {visit.doctorInitials}
-                      </div>
-                      {i < visits.length - 1 && <div className="flex-1 w-px bg-transparent" />}
-                    </div>
-
-                    {/* Visit card */}
-                    <div className={cn(
-                      "flex-1 min-w-0 bg-white rounded-2xl border transition-all",
-                      isExpanded ? "border-herb-green/30 shadow-sm" : "border-border hover:border-border/60 hover:shadow-sm"
-                    )}>
-                      {/* Card header — always visible */}
-                      <button
-                        className="w-full text-left p-4 sm:p-5"
-                        onClick={() => setExpandedVisit(isExpanded ? null : visit.id)}
-                      >
-                        <div className="flex items-start justify-between gap-3 flex-wrap">
-                          <div className="flex items-start gap-3">
-                            {/* Mobile avatar */}
-                            <div className={cn(
-                              "w-9 h-9 rounded-xl flex items-center justify-center text-xs font-bold flex-shrink-0 sm:hidden",
-                              visit.isYou ? "bg-herb-gradient text-white" : "bg-muted text-foreground"
-                            )}>
-                              {visit.doctorInitials}
-                            </div>
-                            <div>
-                              <div className="flex items-center gap-2 flex-wrap">
-                                <p className="text-sm font-bold text-foreground">{visit.date}</p>
-                                <span className="text-[10px] text-muted-foreground">{visit.time}</span>
-                                <span className={cn("text-[10px] font-bold px-2 py-0.5 rounded-full capitalize", typeColor)}>
-                                  {visit.type}
-                                </span>
-                              </div>
-                              <div className="flex items-center gap-2 mt-1 flex-wrap">
-                                <span className="text-xs text-muted-foreground">{visit.doctor}</span>
-                                <span className={cn("text-[10px] font-semibold px-2 py-0.5 rounded-full", specialtyColor)}>
-                                  {visit.specialty}
-                                </span>
-                                {visit.isYou && (
-                                  <span className="text-[10px] font-semibold bg-herb-green text-white px-2 py-0.5 rounded-full">You</span>
-                                )}
-                                <span className="text-[10px] text-muted-foreground bg-muted px-2 py-0.5 rounded-full">
-                                  {visit.mode === "video" ? "📹 Video" : "🏥 In-clinic"} · {visit.duration}
-                                </span>
-                              </div>
-                            </div>
-                          </div>
-                          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}
-                            className={cn("text-muted-foreground transition-transform flex-shrink-0 mt-1", isExpanded ? "rotate-180" : "")}>
-                            <polyline points="6 9 12 15 18 9" />
-                          </svg>
-                        </div>
-
-                        {/* Chief complaint + diagnosis — always visible */}
-                        <div className="mt-3 pt-3 border-t border-border">
-                          <p className="text-xs text-muted-foreground">
-                            <span className="font-semibold text-foreground">CC:</span> {visit.chiefComplaint}
-                          </p>
-                          <p className="text-xs text-muted-foreground mt-1">
-                            <span className="font-semibold text-foreground">Dx:</span> {visit.diagnosis}
-                          </p>
-                          {/* Quick chips */}
-                          {!isExpanded && (
-                            <div className="flex flex-wrap gap-1.5 mt-2">
-                              {visit.medications.length > 0 && (
-                                <span className="text-[10px] bg-herb-green/10 text-herb-green px-2 py-0.5 rounded-full font-medium">
-                                  {visit.medications.length} med{visit.medications.length !== 1 ? "s" : ""}
-                                </span>
-                              )}
-                              {visit.investigations.length > 0 && (
-                                <span className="text-[10px] bg-blue-50 text-blue-700 px-2 py-0.5 rounded-full font-medium">
-                                  {visit.investigations.length} test{visit.investigations.length !== 1 ? "s" : ""} ordered
-                                </span>
-                              )}
-                              {visit.referrals.length > 0 && (
-                                <span className="text-[10px] bg-amber-50 text-amber-700 px-2 py-0.5 rounded-full font-medium">
-                                  Referral: {visit.referrals[0].specialty}
-                                </span>
-                              )}
-                              {visit.followUpDate && (
-                                <span className="text-[10px] bg-muted text-muted-foreground px-2 py-0.5 rounded-full font-medium">
-                                  Follow-up: {visit.followUpDate}
-                                </span>
-                              )}
-                            </div>
-                          )}
-                        </div>
-                      </button>
-
-                      {/* Expanded detail */}
-                      {isExpanded && (
-                        <div className="border-t border-border">
-                          {/* Vitals strip */}
-                          {visit.vitals && (
-                            <div className="px-5 py-3.5 bg-background border-b border-border">
-                              <p className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground mb-2">Vitals at this visit</p>
-                              <div className="flex flex-wrap gap-2">
-                                {[
-                                  { label: "BP",    val: `${visit.vitals.bpSys}/${visit.vitals.bpDia}`, unit: "mmHg",  st: statStyle[vStat("bpSys", visit.vitals.bpSys)]  },
-                                  { label: "Pulse", val: `${visit.vitals.pulse}`,    unit: "bpm",   st: statStyle[vStat("pulse", visit.vitals.pulse)]  },
-                                  { label: "Temp",  val: `${visit.vitals.temp}`,     unit: "°F",    st: statStyle[vStat("temp",  visit.vitals.temp)]   },
-                                  { label: "SpO₂",  val: `${visit.vitals.spo2}`,     unit: "%",     st: statStyle[vStat("spo2",  visit.vitals.spo2)]   },
-                                  { label: "RR",    val: `${visit.vitals.rr}`,       unit: "/min",  st: statStyle[vStat("rr",    visit.vitals.rr)]     },
-                                  { label: "Wt",    val: `${visit.vitals.weight}`,   unit: "kg",    st: "bg-muted text-foreground border-border"        },
-                                ].map(v => (
-                                  <span key={v.label} className={cn("text-[11px] font-semibold px-2.5 py-1 rounded-full border", v.st)}>
-                                    {v.label} {v.val}{v.unit}
-                                  </span>
-                                ))}
-                              </div>
-                            </div>
-                          )}
-
-                          {/* SOAP notes */}
-                          <div className="px-5 py-4 border-b border-border">
-                            <div className="flex items-center justify-between mb-3">
-                              <p className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground">SOAP Notes</p>
-                              <div className="flex gap-0.5 bg-muted rounded-lg p-0.5">
-                                {(["S", "O", "A", "P"] as const).map(tab => (
-                                  <button key={tab} onClick={() => setVisitSoapTab(tab)}
-                                    className={cn("px-2.5 py-1 text-[10px] font-bold rounded-md transition-all",
-                                      visitSoapTab === tab ? "bg-white text-foreground shadow-sm" : "text-muted-foreground hover:text-foreground"
-                                    )}>
-                                    {tab}
-                                  </button>
-                                ))}
-                              </div>
-                            </div>
-                            <div className="text-xs text-foreground leading-relaxed whitespace-pre-line bg-muted/40 rounded-xl px-4 py-3 min-h-[60px]">
-                              {visitSoapTab === "S" && <><span className="font-semibold text-muted-foreground text-[10px] uppercase tracking-wider block mb-1">Subjective</span>{visit.soap.S}</>}
-                              {visitSoapTab === "O" && <><span className="font-semibold text-muted-foreground text-[10px] uppercase tracking-wider block mb-1">Objective</span>{visit.soap.O}</>}
-                              {visitSoapTab === "A" && <><span className="font-semibold text-muted-foreground text-[10px] uppercase tracking-wider block mb-1">Assessment</span>{visit.soap.A}</>}
-                              {visitSoapTab === "P" && <><span className="font-semibold text-muted-foreground text-[10px] uppercase tracking-wider block mb-1">Plan</span>{visit.soap.P}</>}
-                            </div>
-                          </div>
-
-                          <div className="grid grid-cols-1 sm:grid-cols-2 gap-0 divide-y sm:divide-y-0 sm:divide-x divide-border">
-                            {/* Medications */}
-                            <div className="px-5 py-4">
-                              <p className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground mb-3">
-                                Medications Prescribed ({visit.medications.length})
-                              </p>
-                              {visit.medications.length === 0 ? (
-                                <p className="text-xs text-muted-foreground italic">No medications prescribed</p>
-                              ) : (
-                                <div className="space-y-2">
-                                  {visit.medications.map((m: any, mi: number) => (
-                                    <div key={mi} className="flex items-start gap-2">
-                                      <div className={cn("w-1.5 h-1.5 rounded-full mt-1.5 flex-shrink-0",
-                                        m.system === "Ayurveda"   ? "bg-herb-green" :
-                                        m.system === "Homeopathy" ? "bg-blue-400" :
-                                        m.system === "Siddha"     ? "bg-amber-400" : "bg-muted-foreground"
-                                      )} />
-                                      <div className="flex-1 min-w-0">
-                                        <p className="text-xs font-semibold text-foreground leading-snug">{m.name}</p>
-                                        <p className="text-[10px] text-muted-foreground">{m.dose} · {m.frequency}</p>
-                                        {m.anupana && <p className="text-[10px] text-muted-foreground">Anupana: {m.anupana}</p>}
-                                      </div>
-                                    </div>
-                                  ))}
-                                </div>
-                              )}
-                            </div>
-
-                            {/* Investigations + Referrals + Follow-up */}
-                            <div className="px-5 py-4 space-y-4">
-                              {visit.investigations.length > 0 && (
-                                <div>
-                                  <p className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground mb-2">
-                                    Investigations Ordered
-                                  </p>
-                                  <div className="flex flex-wrap gap-1.5">
-                                    {visit.investigations.map((inv: string) => (
-                                      <span key={inv} className="text-[10px] font-medium bg-blue-50 text-blue-700 px-2.5 py-1 rounded-full border border-blue-100">
-                                        {inv}
-                                      </span>
-                                    ))}
-                                  </div>
-                                </div>
-                              )}
-
-                              {visit.referrals.length > 0 && (
-                                <div>
-                                  <p className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground mb-2">Referrals</p>
-                                  {visit.referrals.map((r: any, ri: number) => (
-                                    <div key={ri} className="flex items-center gap-2">
-                                      <span className={cn("text-[10px] font-bold px-2 py-0.5 rounded-full capitalize",
-                                        r.urgency === "emergent" ? "bg-red-50 text-red-600" : r.urgency === "urgent" ? "bg-amber-50 text-amber-700" : "bg-muted text-muted-foreground"
-                                      )}>{r.urgency}</span>
-                                      <span className="text-xs text-foreground">→ {r.specialty}</span>
-                                    </div>
-                                  ))}
-                                </div>
-                              )}
-
-                              {visit.followUpDate && (
-                                <div>
-                                  <p className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground mb-1">Follow-up</p>
-                                  <p className="text-xs font-semibold text-foreground">{visit.followUpDate}</p>
-                                  {visit.followUpInstructions && (
-                                    <p className="text-[10px] text-muted-foreground mt-0.5 leading-relaxed">{visit.followUpInstructions}</p>
-                                  )}
-                                </div>
-                              )}
-                            </div>
-                          </div>
-
-                          {/* Footer actions */}
-                          <div className="px-5 py-3.5 bg-background border-t border-border rounded-b-2xl flex items-center gap-3">
-                            <Link href={`/pro/emr?patient=${id}`}>
-                              <button className="text-xs text-herb-green font-semibold hover:underline">
-                                Open EMR for new visit →
-                              </button>
-                            </Link>
-                            <span className="text-border">·</span>
-                            <button className="text-xs text-muted-foreground hover:text-foreground transition-colors">
-                              📥 Export visit PDF
-                            </button>
-                          </div>
-                        </div>
-                      )}
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
-          </div>
-        </div>
-      )}
-
-      {activeTab === "care-team" && (
-        <div className="space-y-4">
-          <div className="bg-amber-50 border border-amber-200 rounded-2xl px-5 py-3.5">
-            <p className="text-xs font-semibold text-amber-900">Multi-Doctor Care</p>
-            <p className="text-xs text-amber-700 mt-0.5">
-              {patient.name} is receiving treatment from {careTeam.length} practitioner{careTeam.length !== 1 ? "s" : ""}.
-              {careTeam.length > 1 && " Review their prescriptions to avoid interactions before adding new formulations."}
-            </p>
-          </div>
-
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-            {careTeam.map(doc => (
-              <div key={doc.id} className={cn("bg-white rounded-2xl border p-5 relative overflow-hidden", doc.isYou ? "border-herb-green/30" : "border-border")}>
-                {doc.isYou && (
-                  <span className="absolute top-4 right-4 text-[10px] bg-herb-green text-white font-semibold px-2 py-0.5 rounded-full">You</span>
-                )}
-                <div className="flex items-start gap-3 mb-4">
-                  <div className={cn("w-12 h-12 rounded-2xl flex items-center justify-center flex-shrink-0 font-bold text-base", doc.isYou ? "bg-herb-gradient text-white" : "bg-muted text-foreground")}>
-                    {doc.initials}
-                  </div>
-                  <div>
-                    <p className="text-sm font-semibold text-foreground">{doc.name}</p>
-                    <p className="text-xs text-muted-foreground">{doc.specialty} · {doc.qualification}</p>
-                    <p className="text-[10px] text-muted-foreground mt-0.5">{doc.hprId}</p>
-                  </div>
-                </div>
-                <div className="grid grid-cols-3 gap-2 mb-4">
-                  {[
-                    { label: "Since",      value: doc.since },
-                    { label: "Last visit", value: doc.lastVisit },
-                    { label: "Rx count",   value: String(doc.totalRx) },
-                  ].map(item => (
-                    <div key={item.label} className="text-center">
-                      <p className="text-xs font-semibold text-foreground">{item.value}</p>
-                      <p className="text-[10px] text-muted-foreground mt-0.5">{item.label}</p>
-                    </div>
-                  ))}
-                </div>
-                <div className="pt-3 border-t border-border flex items-center justify-between">
-                  <p className="text-xs text-muted-foreground">Follow-up: <span className="text-herb-green font-medium">{doc.nextFollowUp}</span></p>
-                  {!doc.isYou && (
-                    <button className="text-xs text-herb-green font-medium hover:underline">View Rx</button>
-                  )}
+              { label: "Systolic BP", key: "bpSys", suffix: "mmHg", val: vitals.bpSys },
+              { label: "Diastolic BP", key: "bpDia", suffix: "mmHg", val: vitals.bpDia },
+              { label: "Pulse", key: "pulse", suffix: "bpm", val: vitals.pulse },
+              { label: "Temp", key: "temp", suffix: "°F", val: vitals.temp },
+              { label: "SpO₂", key: "spo2", suffix: "%", val: vitals.spo2 },
+              { label: "Weight", key: "weight", suffix: "kg", val: vitals.weight },
+              { label: "BMI", key: "bmi", suffix: "", val: vitals.bmi, readOnly: true },
+            ].map(v => (
+              <div key={v.key}>
+                <label className="block text-[11px] font-bold text-gray-400 uppercase tracking-wider mb-2">{v.label}</label>
+                <div className="relative">
+                  <input 
+                    type="number"
+                    readOnly={v.readOnly}
+                    value={v.val}
+                    onChange={e => {
+                      if (v.key === "weight") {
+                        handleVitalsWeightChange(e.target.value);
+                      } else {
+                        setVitals({...vitals, [v.key]: e.target.value});
+                      }
+                    }}
+                    className={cn(
+                      "w-full bg-[#F8FAFC] border border-gray-200 rounded-[12px] pl-4 pr-12 py-3 text-sm font-semibold outline-none transition-all focus:border-indigo-400 shadow-sm",
+                      v.readOnly ? "bg-gray-50 text-gray-500 cursor-not-allowed" : "focus:ring-2 focus:ring-indigo-100 text-gray-900"
+                    )}
+                  />
+                  {v.suffix && <span className="absolute right-4 top-1/2 -translate-y-1/2 text-xs text-gray-400 font-medium">{v.suffix}</span>}
                 </div>
               </div>
             ))}
           </div>
+          <div className="flex items-center justify-between border-t border-gray-100 pt-5">
+             <div className="flex items-center gap-2 text-xs text-gray-500 bg-gray-50 px-4 py-2 rounded-lg border border-gray-100 shadow-sm">
+                <History className="w-4 h-4 text-gray-400" />
+                <span>Last Recorded: <span className="font-semibold text-gray-700">{latestVitals.date}</span></span>
+             </div>
+          </div>
+        </SectionCard>
 
-          {/* Combined active medicines across all doctors */}
-          <div className="bg-white rounded-2xl border border-border p-5">
-            <h3 className="font-semibold text-foreground text-sm mb-1">All Active Prescriptions</h3>
-            <p className="text-xs text-muted-foreground mb-4">Medicines currently prescribed by all treating doctors</p>
-            <div className="space-y-3">
-              {careTeam.map(doc => (
-                <div key={doc.id}>
-                  <div className="flex items-center gap-2 mb-2">
-                    <div className={cn("w-5 h-5 rounded-md flex items-center justify-center text-[9px] font-bold", doc.isYou ? "bg-herb-gradient text-white" : "bg-muted text-foreground")}>
-                      {doc.initials}
-                    </div>
-                    <p className="text-xs font-semibold text-foreground">{doc.name} <span className="font-normal text-muted-foreground">— {doc.specialty}</span></p>
-                  </div>
-                  <div className="ml-7 space-y-1.5">
-                    {visits
-                      .filter((v: any) => v.doctor === doc.name)
-                      .slice(0, 1)
-                      .map((v: any, i: number) => (
-                        <div key={i} className="text-xs text-muted-foreground bg-background rounded-lg px-3 py-2 border border-border">
-                          <span className="font-medium text-foreground">Rx ({v.date}):</span> {v.medications.map((m: any) => m.name).join(" + ") || "—"}
-                        </div>
-                      ))}
-                  </div>
+        {/* Section 5: Unified Prescription Card */}
+        <SectionCard title="Prescription & Notes" icon={Syringe}>
+          <div className="bg-white border border-gray-200 rounded-[16px] overflow-hidden shadow-sm mb-6">
+            <div className="overflow-x-auto">
+              <table className="w-full text-left border-collapse">
+                <thead>
+                  <tr className="bg-gray-50/80 border-b border-gray-200 text-[11px] text-gray-500 uppercase tracking-wider font-bold">
+                    <th className="px-4 py-3 min-w-[220px] w-1/4">Medicine Name</th>
+                    <th className="px-2 py-3 min-w-[110px]">Form</th>
+                    <th className="px-2 py-3 min-w-[100px]">Dose</th>
+                    <th className="px-2 py-3 min-w-[160px]">Frequency</th>
+                    <th className="px-2 py-3 min-w-[140px]">Timing</th>
+                    <th className="px-2 py-3 min-w-[100px]">Duration</th>
+                    <th className="px-4 py-3 min-w-[200px] w-1/5">Instructions</th>
+                    <th className="px-4 py-3 text-center w-12"></th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-gray-100 bg-[#F8FAFC]">
+                  {medicines.map((med) => (
+                    <tr key={med.id} className="group hover:bg-white transition-colors">
+                      <td className="px-4 py-3">
+                        <input 
+                          type="text" placeholder="Search medicine..." value={med.name} onChange={e => handleMedicineChange(med.id, 'name', e.target.value)}
+                          className="w-full bg-white border border-gray-200 rounded-[8px] px-3 py-2 text-sm focus:ring-2 focus:ring-indigo-100 focus:border-indigo-400 outline-none shadow-sm transition-all"
+                        />
+                      </td>
+                      <td className="px-2 py-3">
+                        <select 
+                          value={med.form} onChange={e => handleMedicineChange(med.id, 'form', e.target.value)}
+                          className="w-full bg-white border border-gray-200 rounded-[8px] px-2 py-2 text-sm focus:ring-2 focus:ring-indigo-100 focus:border-indigo-400 outline-none shadow-sm transition-all"
+                        >
+                          <option>Tablet</option><option>Churna</option><option>Kashayam</option><option>Taila</option><option>Capsule</option><option>Syrup</option><option>Others</option>
+                        </select>
+                      </td>
+                      <td className="px-2 py-3">
+                        <input 
+                          type="text" placeholder="e.g. 10ml" value={med.dose} onChange={e => handleMedicineChange(med.id, 'dose', e.target.value)}
+                          className="w-full bg-white border border-gray-200 rounded-[8px] px-2 py-2 text-sm focus:ring-2 focus:ring-indigo-100 focus:border-indigo-400 outline-none shadow-sm transition-all"
+                        />
+                      </td>
+
+                      <td className="px-2 py-3">
+                        <select 
+                          value={med.frequency || "Morning"} onChange={e => handleMedicineChange(med.id, 'frequency', e.target.value)}
+                          className="w-full bg-white border border-gray-200 rounded-[8px] px-2 py-2 text-sm focus:ring-2 focus:ring-indigo-100 focus:border-indigo-400 outline-none shadow-sm transition-all"
+                        >
+                          <option>Morning</option>
+                          <option>Afternoon</option>
+                          <option>Evening</option>
+                          <option>Night</option>
+                          <option>Morning & Night</option>
+                          <option>Morning, Aft, Night</option>
+                        </select>
+                      </td>
+
+                      <td className="px-2 py-3">
+                        <select 
+                          value={med.timing} onChange={e => handleMedicineChange(med.id, 'timing', e.target.value)}
+                          className="w-full bg-white border border-gray-200 rounded-[8px] px-2 py-2 text-sm focus:ring-2 focus:ring-indigo-100 focus:border-indigo-400 outline-none shadow-sm transition-all"
+                        >
+                          <option>Before Food</option><option>After Food</option><option>Empty Stomach</option>
+                        </select>
+                      </td>
+                      <td className="px-2 py-3">
+                        <input 
+                          type="text" placeholder="15 Days" value={med.duration} onChange={e => handleMedicineChange(med.id, 'duration', e.target.value)}
+                          className="w-full bg-white border border-gray-200 rounded-[8px] px-3 py-2 text-sm focus:ring-2 focus:ring-indigo-100 focus:border-indigo-400 outline-none shadow-sm transition-all"
+                        />
+                      </td>
+                      <td className="px-4 py-3">
+                        <input 
+                          type="text" placeholder="With warm water" value={med.instructions} onChange={e => handleMedicineChange(med.id, 'instructions', e.target.value)}
+                          className="w-full bg-white border border-gray-200 rounded-[8px] px-3 py-2 text-sm focus:ring-2 focus:ring-indigo-100 focus:border-indigo-400 outline-none shadow-sm transition-all"
+                        />
+                      </td>
+                      <td className="px-4 py-3 text-center">
+                        <button onClick={() => handleRemoveMedicine(med.id)} className="p-2 text-gray-400 hover:text-red-500 transition-colors opacity-0 group-hover:opacity-100 rounded-lg hover:bg-red-50">
+                          <Trash2 className="w-4 h-4" />
+                        </button>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+            
+            <div className="bg-white border-t border-gray-200 px-4 py-4 flex items-center justify-between">
+              <button onClick={handleAddMedicine} className="flex items-center gap-1.5 text-sm font-semibold text-indigo-600 hover:text-indigo-800 transition-colors bg-indigo-50/50 hover:bg-indigo-50 px-5 py-2.5 rounded-xl border border-indigo-100">
+                <Plus className="w-4 h-4" /> Add Medicine
+              </button>
+            </div>
+          </div>
+
+          {/* Unified Prescription Notes Area inside the same card */}
+          <div>
+            <label className="block text-sm font-semibold text-gray-700 mb-3 flex items-center gap-2"><FileText className="w-4 h-4 text-gray-400"/> Additional Instructions & Notes</label>
+            <div className="border border-gray-200 rounded-[16px] overflow-hidden bg-white focus-within:ring-2 focus-within:ring-indigo-100 focus-within:border-indigo-400 transition-all shadow-sm">
+              <div className="bg-[#F8FAFC] border-b border-gray-200 px-5 py-3 flex items-center gap-2">
+                <button type="button" onClick={() => handleFormat('bold')} className="p-1.5 text-gray-600 hover:bg-white hover:text-gray-900 rounded-[8px] hover:shadow-sm font-serif font-bold w-8 h-8 flex items-center justify-center text-sm border border-transparent hover:border-gray-200 transition-all">B</button>
+                <button type="button" onClick={() => handleFormat('italic')} className="p-1.5 text-gray-600 hover:bg-white hover:text-gray-900 rounded-[8px] hover:shadow-sm font-serif italic w-8 h-8 flex items-center justify-center text-sm border border-transparent hover:border-gray-200 transition-all">I</button>
+                <button type="button" onClick={() => handleFormat('underline')} className="p-1.5 text-gray-600 hover:bg-white hover:text-gray-900 rounded-[8px] hover:shadow-sm font-serif underline w-8 h-8 flex items-center justify-center text-sm border border-transparent hover:border-gray-200 transition-all">U</button>
+                <div className="w-px h-5 bg-gray-300 mx-2"></div>
+                <button type="button" onClick={() => handleFormat('insertUnorderedList')} className="p-1.5 text-gray-600 hover:bg-white hover:text-gray-900 rounded-[8px] hover:shadow-sm font-serif w-8 h-8 flex items-center justify-center text-sm border border-transparent hover:border-gray-200 transition-all">≡</button>
+                <button type="button" onClick={() => handleFormat('insertOrderedList')} className="p-1.5 text-gray-600 hover:bg-white hover:text-gray-900 rounded-[8px] hover:shadow-sm font-serif w-8 h-8 flex items-center justify-center text-sm border border-transparent hover:border-gray-200 transition-all">1.</button>
+              </div>
+              <div 
+                ref={editorRef}
+                contentEditable
+                suppressContentEditableWarning
+                onBlur={(e) => setPrescriptionNotes(e.currentTarget.innerHTML)}
+                className="w-full px-6 py-5 text-sm outline-none resize-none leading-relaxed text-gray-700 min-h-[150px] [&_ul]:list-disc [&_ul]:pl-5 [&_ol]:list-decimal [&_ol]:pl-5 [&_li]:mb-1"
+              >
+                <ul>
+                  <li>Continue medicines regularly.</li>
+                  <li>Take with warm water.</li>
+                  <li>Follow prescribed diet.</li>
+                  <li>Return after 15 days.</li>
+                </ul>
+              </div>
+            </div>
+          </div>
+        </SectionCard>
+
+        {/* Section 6: Upload Reports */}
+        <SectionCard title="Upload Reports" icon={FileUp}>
+          <div 
+            onClick={() => fileInputRef.current?.click()}
+            className="border-2 border-dashed border-indigo-200 bg-indigo-50/30 hover:bg-indigo-50/80 hover:border-indigo-300 transition-all rounded-[16px] p-10 flex flex-col items-center justify-center text-center cursor-pointer group"
+          >
+            <input 
+              type="file" 
+              ref={fileInputRef} 
+              onChange={handleFileChange}
+              className="hidden" 
+              multiple 
+              accept=".pdf,.jpg,.jpeg,.png" 
+            />
+            <div className="w-14 h-14 bg-white rounded-full flex items-center justify-center shadow-sm border border-indigo-100 mb-4 group-hover:-translate-y-1 transition-transform">
+              <FileUp className="w-6 h-6 text-indigo-500" />
+            </div>
+            <p className="text-base font-semibold text-indigo-900 mb-1">Click to upload or drag and drop</p>
+            <p className="text-sm text-indigo-400 mb-5 font-medium">PDF, JPG, PNG (Max 5MB)</p>
+            <button type="button" className="bg-white border border-gray-200 shadow-sm text-gray-700 text-sm font-bold px-6 py-2.5 rounded-[12px] hover:border-gray-300 hover:bg-gray-50 transition-all pointer-events-none">
+              Browse Files
+            </button>
+          </div>
+
+          {/* List of files to be uploaded */}
+          {uploadedFiles.length > 0 && (
+            <div className="mt-4 space-y-2">
+              <p className="text-xs font-bold text-gray-400 uppercase tracking-wider">Files to Upload:</p>
+              {uploadedFiles.map((file, idx) => (
+                <div key={idx} className="flex items-center justify-between p-3 bg-indigo-50/50 border border-indigo-100 rounded-xl">
+                  <span className="text-xs text-indigo-700 font-semibold">{file.name} ({(file.size / (1024 * 1024)).toFixed(2)} MB)</span>
+                  <button type="button" onClick={(e) => { e.stopPropagation(); handleRemoveFile(idx); }} className="text-rose-500 hover:text-rose-700 transition-colors">
+                    <Trash2 className="w-4 h-4" />
+                  </button>
                 </div>
               ))}
             </div>
-          </div>
-        </div>
-      )}
+          )}
 
-      {activeTab === "reports" && (
-        <div className="space-y-3">
-          {REPORTS.map((r: any, i: number) => (
-            <div key={i} className="bg-white rounded-2xl border border-border p-4 flex items-center gap-4">
-              <div className="w-10 h-10 rounded-xl bg-herb-green/10 flex items-center justify-center flex-shrink-0">
-                <span className="text-lg">{r.type === "Lab" ? "🧪" : "📄"}</span>
-              </div>
-              <div className="flex-1 min-w-0">
-                <p className="text-sm font-medium text-foreground">{r.name}</p>
-                <p className="text-xs text-muted-foreground mt-0.5">{r.date} · {r.type} · {r.size}</p>
-              </div>
-              <button className="text-xs text-herb-green font-medium">View</button>
+          {/* Previously Uploaded Reports */}
+          {(intakeData?.visits?.[0] as any)?.attachments && (intakeData.visits[0] as any).attachments.length > 0 && (
+            <div className="mt-6 space-y-2 border-t border-gray-100 pt-4">
+              <p className="text-xs font-bold text-gray-400 uppercase tracking-wider">Previously Uploaded Reports:</p>
+              {(intakeData.visits[0] as any).attachments.map((file: any) => (
+                <div key={file.id} className="flex items-center justify-between p-3 bg-gray-50 border border-gray-100 rounded-xl">
+                  <span className="text-xs text-gray-700 font-semibold">{file.file_name}</span>
+                  <a href={file.file_url} target="_blank" rel="noopener noreferrer" className="text-indigo-600 hover:text-indigo-800 text-xs font-semibold">
+                    View File
+                  </a>
+                </div>
+              ))}
             </div>
-          ))}
+          )}
+        </SectionCard>
+
+        {/* Section 7: Follow-up & Notes */}
+        <SectionCard title="Follow-up & Notes" icon={Clock}>
+          <div>
+            <label className="block text-sm font-semibold text-gray-700 mb-2">Follow-up Instructions</label>
+            <input 
+              type="text" 
+              placeholder="e.g. Return after 15 days, empty stomach"
+              value={followUpInstructions} onChange={e => setFollowUpInstructions(e.target.value)}
+              className="w-full bg-[#F8FAFC] border border-gray-200 rounded-[12px] px-4 py-3 text-sm focus:ring-2 focus:ring-indigo-100 focus:border-indigo-400 outline-none transition-all shadow-sm"
+            />
+          </div>
+
+          <div className="mt-5 border-t border-gray-100 pt-5">
+            <button 
+              onClick={() => setIsUpcomingVisible(!isUpcomingVisible)}
+              className="flex items-center gap-2 bg-indigo-50/50 hover:bg-indigo-50 text-indigo-600 border border-indigo-100 px-3 py-1.5 rounded-lg text-xs font-semibold transition-all mb-4"
+            >
+              <Calendar className="w-3.5 h-3.5" />
+              {isUpcomingVisible ? "Hide Upcoming Call" : "Show Upcoming Call"}
+            </button>
+
+            {isUpcomingVisible && (
+              <div className="bg-gray-50/50 p-5 rounded-xl border border-gray-100 space-y-4">
+                <h4 className="text-sm font-bold text-gray-800">Patient Availability & Slot Booking</h4>
+
+                {/* Selected Slot Information */}
+                {upcomingCallDate && upcomingCallTime ? (
+                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 p-4 bg-emerald-50 border border-emerald-100 rounded-xl">
+                    <div className="flex items-center gap-2.5">
+                      <div className="w-8 h-8 rounded-lg bg-emerald-500/10 flex items-center justify-center text-emerald-600">
+                        <Calendar className="w-4 h-4" />
+                      </div>
+                      <div>
+                        <p className="text-xs font-bold text-emerald-800">Selected Scheduled Slot</p>
+                        <p className="text-xs text-emerald-700 font-semibold mt-0.5">
+                          {new Date(upcomingCallDate).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' })} at {upcomingCallTime} ({upcomingCallMode === 'video' ? '📹 Video' : '🏥 Clinic'})
+                        </p>
+                      </div>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setUpcomingCallDate("");
+                          setUpcomingCallTime("");
+                          setShowCalendarPanel(false);
+                        }}
+                        className="px-3 py-1.5 bg-rose-50 hover:bg-rose-100 border border-rose-200 text-rose-700 rounded-lg text-xs font-bold transition-all shadow-sm cursor-pointer flex items-center gap-1.5"
+                      >
+                        <Trash2 className="w-3.5 h-3.5" />
+                        Clear
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setShowCalendarPanel(!showCalendarPanel)}
+                        className="px-3 py-1.5 bg-white hover:bg-gray-50 border border-gray-200 text-gray-700 rounded-lg text-xs font-bold transition-all shadow-sm cursor-pointer"
+                      >
+                        {showCalendarPanel ? "Close Calendar" : "Change Date/Slot"}
+                      </button>
+                    </div>
+                  </div>
+                ) : (
+                  <button
+                    type="button"
+                    onClick={() => setShowCalendarPanel(!showCalendarPanel)}
+                    className="w-full flex items-center justify-center gap-2 py-3 bg-white hover:bg-gray-50 border border-gray-200 border-dashed rounded-xl text-xs font-bold text-gray-600 transition-all cursor-pointer shadow-sm"
+                  >
+                    <Calendar className="w-4 h-4 text-indigo-500" />
+                    <span>{showCalendarPanel ? "Close Calendar" : "Select Date & Slot"}</span>
+                  </button>
+                )}
+
+                {/* Calendar Panel Drawout Card */}
+                {showCalendarPanel && (
+                  <div className="bg-white border border-gray-200 rounded-2xl p-4 shadow-sm space-y-4">
+                    <div className="flex items-center justify-between border-b border-gray-100 pb-3">
+                      <span className="text-xs font-bold text-gray-700">Select Date & Time Slot</span>
+                      <button
+                        type="button"
+                        onClick={() => setShowCalendarPanel(false)}
+                        className="text-xs font-bold text-gray-400 hover:text-gray-600 transition-colors"
+                      >
+                        Close
+                      </button>
+                    </div>
+
+                    <div className="grid grid-cols-1 md:grid-cols-[280px_1fr] gap-4">
+                      {/* Left: Custom Monthly Calendar */}
+                      <div className="border border-gray-100 rounded-xl p-3.5 space-y-3 bg-gray-50/50">
+                        <div className="flex items-center justify-between gap-2 select-none">
+                          <span className="text-xs font-bold text-gray-700 font-display">{monthName}</span>
+                          <div className="flex items-center gap-1">
+                            <button
+                              type="button"
+                              onClick={prevMonth}
+                              className="p-1 rounded-md border border-gray-200 bg-white hover:bg-gray-50 transition-all disabled:opacity-40"
+                              disabled={calendarYear === new Date().getFullYear() && calendarMonth === new Date().getMonth()}
+                            >
+                              <ChevronRight size={14} className="rotate-180 text-gray-600" />
+                            </button>
+                            <button
+                              type="button"
+                              onClick={nextMonth}
+                              className="p-1 rounded-md border border-gray-200 bg-white hover:bg-gray-50 transition-all"
+                            >
+                              <ChevronRight size={14} className="text-gray-600" />
+                            </button>
+                          </div>
+                        </div>
+
+                        {/* Calendar Header */}
+                        <div className="grid grid-cols-7 gap-1 text-center text-[9px] font-extrabold text-gray-400 uppercase tracking-widest">
+                          <span>M</span><span>T</span><span>W</span><span>T</span><span>F</span><span>S</span><span>S</span>
+                        </div>
+
+                        {/* Days Grid */}
+                        <div className="grid grid-cols-7 gap-1 text-center">
+                          {calendarDays.map((d, index) => {
+                            if (d === null) return <div key={`empty-${index}`} className="aspect-square" />;
+                            const isAvailable = rawAvailableDates?.includes(d.dateStr);
+                            const isSelected = selectedDate === d.dateStr;
+                            const isToday = d.dateStr === new Date().toISOString().split("T")[0];
+
+                            return (
+                              <button
+                                key={d.dateStr}
+                                type="button"
+                                disabled={!isAvailable}
+                                onClick={() => {
+                                  setSelectedCalendarDate(d.dateStr);
+                                }}
+                                className={cn(
+                                  "aspect-square flex flex-col items-center justify-center text-xs rounded-lg font-bold transition-all relative cursor-pointer",
+                                  isSelected
+                                    ? "bg-indigo-600 text-white shadow-sm scale-103"
+                                    : isAvailable
+                                    ? "hover:bg-indigo-50 border border-gray-200 hover:border-indigo-200 text-gray-800 bg-white"
+                                    : "text-gray-300 cursor-not-allowed opacity-30",
+                                  isToday && !isSelected && "border-indigo-300 text-indigo-600 bg-indigo-50"
+                                )}
+                              >
+                                <span>{d.day}</span>
+                                {isAvailable && !isSelected && (
+                                  <span className="absolute bottom-1 w-1.5 h-1.5 rounded-full bg-emerald-500" />
+                                )}
+                              </button>
+                            );
+                          })}
+                        </div>
+                      </div>
+
+                      {/* Right: Available Slots List */}
+                      <div className="flex flex-col justify-start">
+                        <span className="text-[10px] font-bold text-gray-400 uppercase tracking-wider mb-2">Available Slots for {selectedDate}</span>
+                        {slotsLoading ? (
+                          <div className="text-center text-xs text-gray-500 py-8">
+                            <div className="w-5 h-5 rounded-full border-2 border-indigo-600 border-t-transparent animate-spin mx-auto mb-2" />
+                            Loading slots...
+                          </div>
+                        ) : slots.length === 0 ? (
+                          <div className="text-center text-xs text-amber-600 bg-amber-50 rounded-xl p-4 border border-amber-100 font-semibold leading-relaxed">
+                            ⚠️ No available slots found on this date.
+                          </div>
+                        ) : (
+                          <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-2 max-h-[220px] overflow-y-auto pr-1">
+                            {slots.map((slot) => {
+                              const slotModes: ("video" | "clinic")[] = slot.modes || (slot.mode ? [slot.mode] : []);
+                              const hasVideo = slotModes.includes("video");
+                              const hasClinic = slotModes.includes("clinic");
+                              const isBoth = hasVideo && hasClinic;
+
+                              const isSelected = upcomingCallDate === selectedDate && upcomingCallTime === slot.startTime;
+
+                              return (
+                                <button
+                                  key={slot.id}
+                                  type="button"
+                                  onClick={() => {
+                                    setUpcomingCallDate(selectedDate);
+                                    setUpcomingCallTime(slot.startTime);
+                                    setUpcomingCallMode(slotModes[0]);
+                                    setShowCalendarPanel(false);
+                                  }}
+                                  className={cn(
+                                    "text-xs px-3 py-2.5 rounded-xl border transition-all duration-200 cursor-pointer active:scale-95 text-center flex flex-col items-center justify-center gap-1",
+                                    isSelected
+                                      ? "bg-indigo-600 text-white border-indigo-600 font-bold shadow-sm"
+                                      : isBoth
+                                      ? "bg-purple-50 hover:bg-purple-100 border-purple-200 text-purple-850 font-bold"
+                                      : hasVideo
+                                      ? "bg-emerald-50 hover:bg-emerald-100 border-emerald-100 text-emerald-800 font-bold"
+                                      : "bg-amber-50 hover:bg-amber-100 border-amber-200 text-amber-800 font-bold"
+                                  )}
+                                >
+                                  <span className="font-mono text-center">{slot.startTime}</span>
+                                  <span className="text-[8px] opacity-75 font-semibold">
+                                    {isBoth ? "Video/Clinic" : hasVideo ? "Video" : "Clinic"}
+                                  </span>
+                                </button>
+                              );
+                            })}
+                          </div>
+                        )}
+                      </div>
+
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
+        </SectionCard>
+
+        {/* Final Section: Save Consultation (Bottom scrolling position, not sticky) */}
+        <div className="flex justify-end gap-3 pt-4 pb-12">
+          <button className="flex items-center justify-center gap-2 bg-white hover:bg-gray-50 text-gray-700 font-semibold text-sm px-5 py-2.5 rounded-xl border border-gray-200 shadow-sm transition-all min-w-[120px]">
+            Save Draft
+          </button>
+          
+          {!isSaved ? (
+            <button 
+              onClick={handleSaveConsultation}
+              disabled={isSaving}
+              className="flex items-center justify-center gap-2 bg-gradient-to-r from-indigo-600 to-purple-600 hover:from-indigo-700 hover:to-purple-700 text-white font-semibold text-sm px-6 py-2.5 rounded-xl shadow-[0_4px_12px_rgb(79,70,229,0.25)] hover:shadow-[0_6px_16px_rgb(79,70,229,0.35)] hover:-translate-y-0.5 transition-all min-w-[180px]"
+            >
+              <Save className="w-4 h-4" />
+              {isSaving ? "Saving..." : "Save Consultation"}
+            </button>
+          ) : (
+            <div className="flex items-center gap-3">
+              <span className="text-sm font-bold text-emerald-600 flex items-center gap-1.5 bg-emerald-50 px-3 py-1.5 rounded-xl border border-emerald-100 shadow-sm">
+                <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></span>
+                Saved Successfully
+              </span>
+              <button 
+                onClick={() => router.push(`/pro/prescriptions?patientName=${encodeURIComponent(patient?.name || "")}`)}
+                className="flex items-center justify-center gap-2 bg-gradient-to-r from-emerald-500 to-teal-500 hover:from-emerald-600 hover:to-teal-600 text-white font-semibold text-sm px-6 py-2.5 rounded-xl shadow-[0_4px_12px_rgb(16,185,129,0.25)] hover:shadow-[0_6px_16px_rgb(16,185,129,0.35)] hover:-translate-y-0.5 transition-all min-w-[180px]"
+              >
+                <FileText className="w-4 h-4" />
+                View Details
+              </button>
+            </div>
+          )}
         </div>
-      )}
+      </div>
     </div>
   );
 }

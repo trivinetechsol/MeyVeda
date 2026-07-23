@@ -4,8 +4,7 @@ import Link from "next/link";
 import { useState } from "react";
 import { cn } from "@/lib/utils";
 import { useAuth } from "@/contexts/auth-context";
-import { useFamilyMembers } from "@/lib/hooks";
-import { addFamilyMember, deleteFamilyMember } from "@/lib/queries";
+import { useFamilyMembers, addFamilyMemberApi, deleteFamilyMemberApi } from "@/hooks/use-family";
 
 type Relation = "Spouse" | "Parent" | "Child" | "Sibling" | "Other";
 
@@ -35,7 +34,7 @@ export default function FamilyProfilesPage() {
       const birthYear = new Date().getFullYear() - parseInt(form.age);
       const dobString = `${birthYear}-06-15`; // Mid-year approximation for DOB
       
-      await addFamilyMember(user.id, {
+      await addFamilyMemberApi({
         fullName: form.name,
         relationship: form.relation.toLowerCase(),
         dob: dobString,
@@ -54,7 +53,7 @@ export default function FamilyProfilesPage() {
 
   async function handleRemove(id: string) {
     try {
-      await deleteFamilyMember(id);
+      await deleteFamilyMemberApi(id);
       if (activeId === id) setActiveId(null);
       refetch();
     } catch (err) {

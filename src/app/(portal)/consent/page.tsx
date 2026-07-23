@@ -1,12 +1,34 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { cn } from "@/lib/utils";
-import { useAuth } from "@/contexts/auth-context";
-import { useConsentGrants } from "@/lib/hooks";
-import { revokeConsent } from "@/lib/queries";
+import type { ConsentView } from "./type";
 
 type ConsentTab = "active" | "expired";
+
+async function fetchConsentGrants(): Promise<ConsentView[]> {
+  const response = await fetch("/api/consent", {
+    method: "GET",
+    credentials: "include",
+    cache: "no-store",
+  });
+  const result = await response.json();
+  if (!response.ok || !result.success) {
+    throw new Error(result.error || "Unable to load consent grants");
+  }
+  return result.data as ConsentView[];
+}
+
+async function revokeConsent(id: string): Promise<void> {
+  const response = await fetch(`/api/consent/${id}`, {
+    method: "DELETE",
+    credentials: "include",
+  });
+  const result = await response.json();
+  if (!response.ok || !result.success) {
+    throw new Error(result.error || "Unable to revoke consent");
+  }
+}
 
 const CONSENT_ICONS: Record<string, string> = {
   prescriptions: "🏥",
@@ -25,13 +47,28 @@ const getIconForRecordTypes = (types: string[]) => {
 };
 
 export default function ConsentPage() {
-  const { user } = useAuth();
-  const { data: rawConsents, loading, refetch } = useConsentGrants(user?.id);
-  const allConsents = rawConsents ?? [];
+  const [allConsents, setAllConsents] = useState<ConsentView[]>([]);
+  const [loading, setLoading] = useState(true);
 
   const [activeTab, setActiveTab] = useState<ConsentTab>("active");
   const [revoking, setRevoking] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
+
+  async function loadConsents(): Promise<void> {
+    try {
+      setLoading(true);
+      const data = await fetchConsentGrants();
+      setAllConsents(data);
+    } catch (err) {
+      console.error("Failed to load consent grants:", err);
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  useEffect(() => {
+    void loadConsents();
+  }, []);
 
   // Divide consents into active vs expired/revoked
   const activeConsents = allConsents.filter((c) => {
@@ -49,7 +86,7 @@ export default function ConsentPage() {
     try {
       await revokeConsent(id);
       setRevoking(null);
-      refetch();
+      await loadConsents();
     } catch (err) {
       console.error("Failed to revoke consent:", err);
     } finally {

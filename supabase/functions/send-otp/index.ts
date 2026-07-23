@@ -42,8 +42,8 @@ serve(async (req: Request) => {
     // Generate 6 digit OTP
     const otp = Math.floor(100000 + Math.random() * 900000).toString();
 
-    // Expires in 10 minutes
-    const expiresAt = new Date(Date.now() + 10 * 60 * 1000).toISOString();
+    // Expires in 5 minutes
+    const expiresAt = new Date(Date.now() + 5 * 60 * 1000).toISOString();
 
     const { error: dbError } = await supabase
       .from('email_otps')
@@ -72,7 +72,7 @@ serve(async (req: Request) => {
             from: { address: FROM_EMAIL },
             to: [{ email_address: { address: email } }],
             subject: "Your OTP verification code",
-            textbody: `Your OTP is ${otp}. It will expire in 10 minutes.`,
+            textbody: `Your OTP is ${otp}. It will expire in 5 minutes.`,
           }),
         });
 
@@ -99,7 +99,7 @@ serve(async (req: Request) => {
             from: FROM_EMAIL,
             to: email,
             subject: "Your OTP verification code",
-            text: `Your OTP is ${otp}. It will expire in 10 minutes.`,
+            text: `Your OTP is ${otp}. It will expire in 5 minutes.`,
           }),
         });
 

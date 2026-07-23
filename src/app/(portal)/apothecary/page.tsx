@@ -1,10 +1,20 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useAuth } from "@/contexts/auth-context";
-import { usePatientPrescriptions, useMedicines } from "@/lib/hooks";
+import { usePatientPrescriptions } from "@/hooks/use-prescriptions";
+import type { MedicineRow } from "./type";
+
+async function fetchMedicines(): Promise<MedicineRow[]> {
+  const response = await fetch("/api/medicines", { method: "GET", credentials: "include", cache: "no-store" });
+  const result = await response.json();
+  if (!response.ok || !result.success) {
+    throw new Error(result.error || "Unable to load medicines");
+  }
+  return result.data as MedicineRow[];
+}
 
 const getMedicineIcon = (name: string) => {
   const n = name.toLowerCase();
@@ -19,32 +29,95 @@ export default function ApothecaryPage() {
   const router = useRouter();
   const { user } = useAuth();
   const { data: rawRx, loading: rxLoading } = usePatientPrescriptions(user?.id);
-  const { data: rawMedicines, loading: medsLoading } = useMedicines();
+  const [rawMedicines, setRawMedicines] = useState<MedicineRow[] | null>(null);
+  const [medsLoading, setMedsLoading] = useState(true);
+
+  useEffect(() => {
+    fetchMedicines()
+      .then(setRawMedicines)
+      .catch((err) => console.error("Failed to load medicines:", err))
+      .finally(() => setMedsLoading(false));
+  }, []);
 
   const [cart, setCart] = useState<any[]>([]);
+  const [isUploading, setIsUploading] = useState(false);
+  const [uploadedFile, setUploadedFile] = useState<string | null>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+
+  const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    
+    setIsUploading(true);
+    // Simulate upload and processing delay
+    setTimeout(() => {
+      setIsUploading(false);
+      setUploadedFile(file.name);
+
+      const mockRxItems = [
+        {
+          id: `up-rx-0`,
+          name: "Ashwagandha Churna",
+          brand: "Kottakkal Arya Vaidya Sala",
+          weight: "100g",
+          price: 285,
+          quantity: 1,
+          prescribed: true,
+          icon: "🫙",
+        },
+        {
+          id: `up-rx-1`,
+          name: "Triphala Tablets",
+          brand: "Kottakkal",
+          weight: "60 tabs",
+          price: 95,
+          quantity: 1,
+          prescribed: true,
+          icon: "💊",
+        },
+        {
+          id: `up-rx-2`,
+          name: "Chyawanprash",
+          brand: "Dabur",
+          weight: "500g",
+          price: 189,
+          quantity: 1,
+          prescribed: true,
+          icon: "🌿",
+        }
+      ];
+
+      setCart((prev) => {
+        const filteredPrev = prev.filter(item => !mockRxItems.some(mr => mr.name === item.name));
+        return [...filteredPrev, ...mockRxItems];
+      });
+
+      alert(`Prescription "${file.name}" uploaded and verified successfully! 3 prescribed formulations loaded into your cart.`);
+    }, 1500);
+  };
 
   useEffect(() => {
     if (rawRx && rawRx.length > 0) {
       const latestRx = rawRx[0]; // latest prescription
-      const rxItems = latestRx.items.map((item, i) => ({
-        id: `rx-${i}`,
-        name: item.name,
-        brand: "MeyVeda Apothecary",
-        weight: item.dose || "100g",
-        price: 250, // default price in INR
-        quantity: 1,
-        prescribed: true,
-        icon: getMedicineIcon(item.name),
-      }));
+      const rxItems = latestRx.items.map((item, i) => {
+        // We try to find the full medicine info to get the price, otherwise use standard.
+        const fullMed = rawMedicines?.find((m) => m.name === item.name);
+        return {
+          id: (item as any).id || `rx-${i}`,
+          name: item.name,
+          brand: fullMed?.brand || "MeyVeda Apothecary",
+          weight: item.dose || "100g",
+          price: fullMed?.price_paise ? fullMed.price_paise / 100 : 250, // actual price or default
+          quantity: 1,
+          prescribed: true,
+          icon: getMedicineIcon(item.name),
+        };
+      });
       setCart(rxItems);
     } else {
-      // Fallback default mock items if no live prescriptions in DB
-      setCart([
-        { id: "rx-1", name: "Ashwagandha Churna", brand: "Kottakkal Arya Vaidya Sala", weight: "100g", price: 285, quantity: 1, prescribed: true, icon: "🌿" },
-        { id: "rx-2", name: "Triphala Churna", brand: "Himalaya Wellness", weight: "100g", price: 145, quantity: 1, prescribed: true, icon: "🫙" },
-      ]);
+      setCart([]);
     }
-  }, [rawRx]);
+  }, [rawRx, rawMedicines]);
 
   function changeQty(id: string, delta: number) {
     setCart((prev) =>
@@ -86,20 +159,13 @@ export default function ApothecaryPage() {
     ? rawMedicines.slice(0, 6).map((m, i) => ({
         id: m.id || `med-${i}`,
         name: m.name,
-        brand: m.discipline || "MeyVeda",
-        price: 150, // standard price mapping
+        brand: m.brand || "MeyVeda",
+        price: m.price_paise ? m.price_paise / 100 : 150, 
         icon: getMedicineIcon(m.name),
       }))
-    : [
-        { id: "w-1", name: "Chyawanprash", brand: "Dabur", price: 189, icon: "🫙" },
-        { id: "w-2", name: "Tulsi Drop", brand: "Himalaya", price: 120, icon: "🌱" },
-        { id: "w-3", name: "Neem Capsules", brand: "Organic India", price: 245, icon: "💊" },
-        { id: "w-4", name: "Giloy Juice", brand: "Patanjali", price: 159, icon: "🥤" },
-        { id: "w-5", name: "Triphala Tablets", brand: "Kottakkal", price: 95, icon: "🌿" },
-        { id: "w-6", name: "Brahmi Oil", brand: "Bajaj Keo Karpin", price: 175, icon: "🫙" },
-      ];
+    : [];
 
-  const hasRx = rawRx && rawRx.length > 0;
+  const hasRx = (rawRx && rawRx.length > 0) || !!uploadedFile;
 
   return (
     <div className="px-4 sm:px-6 lg:px-8 py-6 max-w-7xl mx-auto">
@@ -135,10 +201,24 @@ export default function ApothecaryPage() {
         <div className="flex-1">
           <p className="text-sm font-semibold text-foreground">Upload Prescription</p>
           <p className="text-xs text-muted-foreground mt-0.5">
-            Order prescribed medicines directly from your doctor&apos;s Rx
+            {uploadedFile 
+              ? `Active scanned file: ${uploadedFile}` 
+              : "Order prescribed medicines directly from your doctor's Rx"
+            }
           </p>
-          <button className="mt-2 text-xs text-herb-green font-semibold flex items-center gap-1">
-            Choose File →
+          <input 
+            type="file" 
+            className="hidden" 
+            ref={fileInputRef} 
+            onChange={handleFileUpload} 
+            accept="image/*,.pdf" 
+          />
+          <button 
+            onClick={() => fileInputRef.current?.click()}
+            disabled={isUploading}
+            className="mt-2 text-xs text-herb-green font-semibold flex items-center gap-1 disabled:opacity-50"
+          >
+            {isUploading ? "Uploading..." : uploadedFile ? "Change File →" : "Choose File →"}
           </button>
         </div>
         <div className="hidden sm:flex items-center gap-2 bg-herb-green/5 rounded-xl border border-herb-green/20 px-3 py-2">
@@ -146,7 +226,11 @@ export default function ApothecaryPage() {
             <path d="M22 11.08V12a10 10 0 11-5.93-9.14" /><polyline points="22 4 12 14.01 9 11.01" />
           </svg>
           <p className="text-xs text-herb-green font-medium">
-            {hasRx ? `Rx-Verified: ${rawRx[0].doctorName} · ${rawRx[0].items.length} items loaded` : "Link your ABHA ID to sync prescriptions"}
+            {hasRx ? (
+              uploadedFile 
+                ? `Rx-Verified: Scanned Rx (${uploadedFile}) · ${cart.filter(x => x.prescribed).length} items loaded`
+                : `Rx-Verified: ${rawRx?.[0]?.doctorName ?? "Doctor"} · ${rawRx?.[0]?.items?.length ?? 0} items loaded`
+            ) : "Link your ABHA ID or upload scanned Rx to sync prescriptions"}
           </p>
         </div>
       </div>

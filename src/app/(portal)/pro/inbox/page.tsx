@@ -3,17 +3,66 @@
 import { useState, useEffect } from "react";
 import Link from "next/link";
 import { cn } from "@/lib/utils";
-import { useAuth } from "@/contexts/auth-context";
-import { usePractitionerInbox, useBoundedMessages } from "@/lib/hooks";
-import { sendBoundedMessage } from "@/lib/queries";
+import type { InboxThread, MessageRow } from "./type";
+
+async function fetchInbox(): Promise<InboxThread[]> {
+  const response = await fetch("/api/pro-inbox", { method: "GET", credentials: "include", cache: "no-store" });
+  const result = await response.json();
+  if (!response.ok || !result.success) {
+    throw new Error(result.error || "Unable to load inbox");
+  }
+  return result.data as InboxThread[];
+}
+
+async function fetchMessages(consultationId: string): Promise<MessageRow[]> {
+  const response = await fetch(`/api/message?consultationId=${consultationId}`, {
+    method: "GET",
+    credentials: "include",
+    cache: "no-store",
+  });
+  const result = await response.json();
+  if (!response.ok || !result.success) {
+    throw new Error(result.error || "Unable to load messages");
+  }
+  return result.data as MessageRow[];
+}
+
+async function sendMessage(consultationId: string, content: string): Promise<void> {
+  const response = await fetch("/api/message", {
+    method: "POST",
+    credentials: "include",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ consultationId, content }),
+  });
+  const result = await response.json();
+  if (!response.ok || !result.success) {
+    throw new Error(result.error || "Unable to send message");
+  }
+}
 
 export default function InboxPage() {
-  const { user } = useAuth();
-  const { data: rawThreads, loading: inboxLoading, refetch: refetchInbox } = usePractitionerInbox(user?.id);
-  const threads = rawThreads ?? [];
+  const [threads, setThreads] = useState<InboxThread[]>([]);
+  const [inboxLoading, setInboxLoading] = useState(true);
+  const [messages, setMessages] = useState<MessageRow[]>([]);
 
   const [activeId, setActiveId] = useState<string | null>(null);
   const [message, setMessage] = useState("");
+
+  async function loadInbox(): Promise<void> {
+    try {
+      setInboxLoading(true);
+      const data = await fetchInbox();
+      setThreads(data);
+    } catch (err) {
+      console.error("Failed to load inbox:", err);
+    } finally {
+      setInboxLoading(false);
+    }
+  }
+
+  useEffect(() => {
+    void loadInbox();
+  }, []);
 
   // Default selection when threads load
   useEffect(() => {
@@ -25,21 +74,24 @@ export default function InboxPage() {
   const activeThread = threads.find((t) => t.id === activeId) ?? (threads.length > 0 ? threads[0] : null);
 
   // Load messages for selected thread
-  const { data: rawMessages, refetch: refetchMessages } = useBoundedMessages(activeThread?.consultationId);
-  const messages = rawMessages ?? [];
+  useEffect(() => {
+    if (!activeThread?.consultationId) {
+      setMessages([]);
+      return;
+    }
+    fetchMessages(activeThread.consultationId)
+      .then(setMessages)
+      .catch((err) => console.error("Failed to load messages:", err));
+  }, [activeThread?.consultationId]);
 
   async function handleSendMessage() {
-    if (!message.trim() || !user?.id || !activeThread) return;
+    if (!message.trim() || !activeThread) return;
     try {
-      await sendBoundedMessage({
-        consultationId: activeThread.consultationId,
-        senderUserId: user.id,
-        direction: "doctor_to_patient",
-        content: message.trim(),
-      });
+      await sendMessage(activeThread.consultationId, message.trim());
       setMessage("");
-      refetchMessages();
-      refetchInbox();
+      const updated = await fetchMessages(activeThread.consultationId);
+      setMessages(updated);
+      await loadInbox();
     } catch (err) {
       console.error("Failed to send message:", err);
     }

@@ -4,8 +4,27 @@ import { useState } from "react";
 import Link from "next/link";
 import { cn } from "@/lib/utils";
 import { useAuth } from "@/contexts/auth-context";
-import { useAppointments, usePatientPrescriptions } from "@/lib/hooks";
-import { submitRating } from "@/lib/queries";
+import { useAppointments } from "@/hooks/use-appointments";
+import { usePatientPrescriptions } from "@/hooks/use-prescriptions";
+
+async function submitRating(params: {
+  userId: string;
+  consultationId: string;
+  practitionerId: string;
+  stars: number;
+  reviewText: string;
+}): Promise<void> {
+  const response = await fetch("/api/booking/rating", {
+    method: "POST",
+    credentials: "include",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(params),
+  });
+  const result = await response.json();
+  if (!response.ok || !result.success) {
+    throw new Error(result.error || "Unable to submit rating");
+  }
+}
 
 const NEXT_STEPS = [
   { id: "rx", label: "View your care plan", href: "/prescription", icon: "📋", cta: "View Care Plan" },

@@ -1,27 +1,17 @@
-// MeyVeda shared type definitions
-export interface Practitioner {
-  id: string;
-  name: string;
-  specialty: string;
-  discipline: AYUSHDiscipline;
-  experience: number;
-  rating: number;
-  reviews: number;
-  fee: number;
-  hprId: string;
-  isVerified: boolean;
-  avatar: string;
-  languages: string[];
-  consultModes: ("video" | "clinic")[];
-  nextAvailable: string;
-  location: string;
-  qualifications: string[];
-  about: string;
-  clinicFee?: number;
-  slotDuration?: number;
-  bufferMin?: number;
-}
+/**
+ * Shared type definitions.
+ *
+ * @deprecated Import from feature-specific type files or `@/types/` instead.
+ * This file is kept for backward compatibility during migration.
+ */
 
+// Re-export from canonical locations
+export type { Practitioner } from "@/features/doctor/types/doctor.types";
+export type { DinacharTask } from "@/features/dinacharya/types/dinacharya.types";
+export type { AYUSHDiscipline, QueueStatus, ChatMessage, SocialHistory, MedicalHistory } from "@/types/common.types";
+export type { QueuePatient } from "@/features/pro/types/pro.types";
+
+// Types that are still unique to this file (kept for backward compat)
 export interface Appointment {
   id: string;
   doctor: Practitioner;
@@ -30,15 +20,6 @@ export interface Appointment {
   mode: "video" | "clinic";
   status: "upcoming" | "completed" | "cancelled";
   patientName: string;
-}
-
-export interface DinacharTask {
-  id: string;
-  time: string;
-  title: string;
-  description: string;
-  done: boolean;
-  category: "diet" | "exercise" | "mindfulness" | "medicine";
 }
 
 export interface HealthRecord {
@@ -51,17 +32,31 @@ export interface HealthRecord {
   summary: string;
 }
 
-export interface ChatMessage {
-  id: string;
-  role: "user" | "ai";
-  content: string;
-  timestamp: Date;
-}
+export type IntakeTab = "intake" | "vitals" | "medical-history" | "history" | "care-team" | "reports";
 
-export type AYUSHDiscipline =
-  | "Ayurveda"
-  | "Yoga"
-  | "Naturopathy"
-  | "Unani"
-  | "Siddha"
-  | "Homeopathy";
+export type VitalsRecord = {
+  date: string; doctor: string; doctorInitials: string; isYou?: boolean;
+  bpSys: number; bpDia: number; pulse: number; temp: number;
+  spo2: number; rr: number; weight: number; height: number;
+};
+
+export type VisitRecord = {
+  id: string;
+  date: string; time: string; duration: string;
+  mode: "video" | "clinic";
+  doctor: string; specialty: string; doctorInitials: string; isYou?: boolean;
+  chiefComplaint: string;
+  soap: { S: string; O: string; A: string; P: string };
+  diagnosis: string;
+  vitals: { bpSys: number; bpDia: number; pulse: number; temp: number; spo2: number; rr: number; weight: number; height: number } | null;
+  medications: { name: string; dose: string; frequency: string; anupana: string; system: string }[];
+  investigations: string[];
+  referrals: { specialty: string; urgency: string }[];
+  followUpDate: string | null;
+  followUpInstructions: string;
+  type: "initial" | "follow-up" | "review" | "urgent";
+};
+
+// Import Practitioner for the Appointment interface above
+import type { Practitioner } from "@/features/doctor/types/doctor.types";
+import type { AYUSHDiscipline } from "@/types/common.types";

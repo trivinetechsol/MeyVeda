@@ -3,7 +3,7 @@
 import { createContext, useContext, useState, useEffect, useCallback } from "react";
 import { useRouter } from "next/navigation";
 
-export type UserRole = "patient" | "practitioner";
+export type UserRole = "patient" | "practitioner" | "admin" | "super_admin";
 
 export interface AuthUser {
   id?: string;
@@ -28,17 +28,9 @@ interface AuthContextValue {
 
 const AuthContext = createContext<AuthContextValue | null>(null);
 
+// Cookies are now handled by the backend HttpOnly cookies automatically.
+
 const STORAGE_KEY = "mv_user";
-const COOKIE_NAME = "mv_auth";
-const COOKIE_MAX_AGE = 60 * 60 * 24 * 30; // 30 days
-
-function setCookie(value: string) {
-  document.cookie = `${COOKIE_NAME}=${value}; path=/; max-age=${COOKIE_MAX_AGE}; SameSite=Lax`;
-}
-
-function clearCookie() {
-  document.cookie = `${COOKIE_NAME}=; path=/; max-age=0`;
-}
 
 export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [user, setUser] = useState<AuthUser | null>(null);
@@ -58,15 +50,14 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const login = useCallback((userData: AuthUser) => {
     setUser(userData);
     localStorage.setItem(STORAGE_KEY, JSON.stringify(userData));
-    const cookiePayload = btoa(JSON.stringify({ role: userData.role, phone: userData.phone }));
-    setCookie(cookiePayload);
   }, []);
 
-  const logout = useCallback(() => {
+  const logout = useCallback(async () => {
     setUser(null);
     localStorage.removeItem(STORAGE_KEY);
-    clearCookie();
-    router.push("/onboarding");
+    // Call backend to clear HttpOnly cookies
+    await fetch("/api/auth/logout", { method: "POST" });
+    router.push("/login");
   }, [router]);
 
   const updateUser = useCallback((partial: Partial<AuthUser>) => {
@@ -74,11 +65,27 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       if (!prev) return prev;
       const updated = { ...prev, ...partial };
       localStorage.setItem(STORAGE_KEY, JSON.stringify(updated));
-      const cookiePayload = btoa(JSON.stringify({ role: updated.role, phone: updated.phone }));
-      setCookie(cookiePayload);
       return updated;
     });
   }, []);
+
+  useEffect(() => {
+    if (user && user.id && user.name === "Verified User") {
+      (async () => {
+        try {
+          const res = await fetch("/api/auth/me");
+          if (res.ok) {
+            const data = await res.json();
+            if (data.data?.user?.name && data.data.user.name !== "Verified User") {
+              updateUser({ name: data.data.user.name });
+            }
+          }
+        } catch (err) {
+          console.error("Failed to fetch user profile", err);
+        }
+      })();
+    }
+  }, [user, updateUser]);
 
   return (
     <AuthContext.Provider value={{ user, loading, login, logout, updateUser }}>

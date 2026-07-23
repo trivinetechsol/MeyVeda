@@ -2,132 +2,241 @@
 
 import { useState, useEffect } from "react";
 import Link from "next/link";
-import { Progress } from "@/components/ui/progress";
 import { ABHABadge } from "@/components/Badges";
 import { PractitionerCard } from "@/components/PractitionerCard";
-import { usePractitioners, useDinacharyaTasks, useAppointments, usePatientProfile } from "@/lib/hooks";
-import { toggleDinacharyaTask } from "@/lib/queries";
+import { UpcomingCarousel } from "@/components/UpcomingCarousel";
+import { useAppointments } from "@/hooks/use-appointments";
+import { usePatientUpcomingCalls, fetchDetailedConsultations } from "@/hooks/use-consultations";
+import { usePractitioners } from "@/hooks/use-discover";
+import { usePatientProfile } from "@/hooks/use-profile";
 import { cn } from "@/lib/utils";
 import { useAuth } from "@/contexts/auth-context";
-import type { DinacharTask } from "@/lib/types";
+import {
+  FileText, Download, User, Calendar, Pill, Heart, Award, Clock, ArrowRight,
+  Sun, Sunrise, Sunset, Moon, Utensils, UtensilsCrossed, Check, X
+} from "lucide-react";
+
+const parseFrequency = (freq: string) => {
+  const f = freq?.toLowerCase() || "";
+  let m = false, a = false, e = false, n = false;
+
+  if (f.includes("-")) {
+    const parts = f.split("-").map(p => p.trim());
+    if (parts.length === 3) {
+      m = parts[0] !== "0";
+      a = parts[1] !== "0";
+      n = parts[2] !== "0";
+    } else if (parts.length === 4) {
+      m = parts[0] !== "0";
+      a = parts[1] !== "0";
+      e = parts[2] !== "0";
+      n = parts[3] !== "0";
+    }
+  } else {
+    if (f.includes("morning") || f.includes("bd") || f.includes("tds") || f.includes("twice") || f.includes("thrice")) m = true;
+    if (f.includes("afternoon") || f.includes("tds") || f.includes("thrice")) a = true;
+    if (f.includes("evening")) e = true;
+    if (f.includes("night") || f.includes("bd") || f.includes("twice") || f.includes("tds") || f.includes("thrice")) n = true;
+  }
+  return { m, a, e, n };
+};
+
+const parseTiming = (timing: string) => {
+  const t = (timing || "").toLowerCase();
+  const bf = t.includes("before") || t.includes("empty");
+  const af = t.includes("after") || t.includes("post") || !bf;
+  return { bf, af: af && !bf };
+};
 
 export default function HomePage() {
   const { user } = useAuth();
   const firstName = user?.name?.split(" ")[0] ?? "there";
 
-  // Fetch from Supabase
+  // Fetch from backend
   const { data: practitioners } = usePractitioners();
-  const { data: dbTasks } = useDinacharyaTasks(user?.id);
   const { data: appointments } = useAppointments(user?.id);
   const { data: profile } = usePatientProfile(user?.id);
+  const { data: upcomingCalls } = usePatientUpcomingCalls(user?.id);
 
-  const [tasks, setTasks] = useState<DinacharTask[]>([]);
+  const [consultations, setConsultations] = useState<any[]>([]);
+  const [selectedConsultId, setSelectedConsultId] = useState<string | null>(null);
+  const [hiddenDoctorIds, setHiddenDoctorIds] = useState<string[]>([]);
 
   useEffect(() => {
-    if (dbTasks && dbTasks.length > 0) setTasks(dbTasks);
-  }, [dbTasks]);
+    const hidden = localStorage.getItem("hidden_doctors");
+    if (hidden) {
+      try {
+        setHiddenDoctorIds(JSON.parse(hidden));
+      } catch (e) { }
+    }
+  }, []);
 
-  const completedCount = tasks.filter((t) => t.done).length;
-  const progressPct = tasks.length > 0 ? Math.round((completedCount / tasks.length) * 100) : 0;
-  const wellnessScore = tasks.length > 0 ? progressPct : 74;
+  useEffect(() => {
+    async function loadConsultations() {
+      if (user?.id) {
+        const data = await fetchDetailedConsultations();
+        setConsultations(data || []);
+      }
+    }
+    loadConsultations();
+  }, [user?.id]);
 
-  const upcoming = (appointments ?? []).find((a) => a.status === "upcoming");
+  const parseApptDate = (dateStr: string) => {
+    if (!dateStr) return Infinity;
+    const str = dateStr.replace(/ · |, /, " ");
 
-  // Prakriti Assessment Mapping
-  let prakritiComposition = [
-    { dosha: "Vata", pct: 33, color: "bg-sky-100 text-sky-700" },
-    { dosha: "Pitta", pct: 33, color: "bg-amber-100 text-amber-700" },
-    { dosha: "Kapha", pct: 34, color: "bg-emerald-100 text-emerald-700" },
-  ];
-  let dominantPrakriti = "Assessing";
-  let prakritiAdvice = "Balance all three doshas with a varied, seasonal diet and moderate routines.";
-  let hasPrakriti = false;
+    // Extract time if present
+    const timeMatch = str.match(/\d{1,2}:\d{2}\s*(?:AM|PM)/i);
+    const timeStr = timeMatch ? timeMatch[0] : "11:59 PM"; // Default to end of day if no time
 
-  if (profile?.prakriti) {
-    hasPrakriti = true;
-    const rawP = profile.prakriti.toLowerCase().replace(/_/g, "-");
-    dominantPrakriti = profile.prakriti;
-    if (rawP === "vata-pitta" || rawP === "vata_pitta") {
-      prakritiComposition = [
-        { dosha: "Vata", pct: 45, color: "bg-sky-100 text-sky-700" },
-        { dosha: "Pitta", pct: 40, color: "bg-amber-100 text-amber-700" },
-        { dosha: "Kapha", pct: 15, color: "bg-emerald-100 text-emerald-700" },
-      ];
-      prakritiAdvice = "Dominant: Vata-Pitta. Focus on grounding routines and cooling foods.";
-    } else if (rawP === "vata-kapha" || rawP === "vata_kapha") {
-      prakritiComposition = [
-        { dosha: "Vata", pct: 45, color: "bg-sky-100 text-sky-700" },
-        { dosha: "Pitta", pct: 15, color: "bg-amber-100 text-amber-700" },
-        { dosha: "Kapha", pct: 40, color: "bg-emerald-100 text-emerald-700" },
-      ];
-      prakritiAdvice = "Dominant: Vata-Kapha. Focus on warm, light meals and dynamic exercises.";
-    } else if (rawP === "pitta-kapha" || rawP === "pitta_kapha") {
-      prakritiComposition = [
-        { dosha: "Vata", pct: 15, color: "bg-sky-100 text-sky-700" },
-        { dosha: "Pitta", pct: 45, color: "bg-amber-100 text-amber-700" },
-        { dosha: "Kapha", pct: 40, color: "bg-emerald-100 text-emerald-700" },
-      ];
-      prakritiAdvice = "Dominant: Pitta-Kapha. Focus on refreshing, light meals and calming habits.";
-    } else if (rawP === "vata") {
-      prakritiComposition = [
-        { dosha: "Vata", pct: 70, color: "bg-sky-100 text-sky-700" },
-        { dosha: "Pitta", pct: 15, color: "bg-amber-100 text-amber-700" },
-        { dosha: "Kapha", pct: 15, color: "bg-emerald-100 text-emerald-700" },
-      ];
-      prakritiAdvice = "Dominant: Vata. Focus on nourishing, warm foods and regular schedules.";
-    } else if (rawP === "pitta") {
-      prakritiComposition = [
-        { dosha: "Vata", pct: 15, color: "bg-sky-100 text-sky-700" },
-        { dosha: "Pitta", pct: 70, color: "bg-amber-100 text-amber-700" },
-        { dosha: "Kapha", pct: 15, color: "bg-emerald-100 text-emerald-700" },
-      ];
-      prakritiAdvice = "Dominant: Pitta. Focus on cooling foods, hydration, and mind relaxation.";
-    } else if (rawP === "kapha") {
-      prakritiComposition = [
-        { dosha: "Vata", pct: 15, color: "bg-sky-100 text-sky-700" },
-        { dosha: "Pitta", pct: 15, color: "bg-amber-100 text-amber-700" },
-        { dosha: "Kapha", pct: 70, color: "bg-emerald-100 text-emerald-700" },
-      ];
-      prakritiAdvice = "Dominant: Kapha. Focus on warm, stimulating spices, and active workouts.";
+    if (str.toLowerCase().startsWith("today")) {
+      const d = new Date();
+      return new Date(`${d.toDateString()} ${timeStr}`).getTime();
+    }
+    if (str.toLowerCase().startsWith("tomorrow")) {
+      const d = new Date();
+      d.setDate(d.getDate() + 1);
+      return new Date(`${d.toDateString()} ${timeStr}`).getTime();
+    }
+
+    // For standard dates like "16 Jul 2026"
+    // Try to inject the time if it isn't parsed implicitly
+    const parsedTime = new Date(`${str.replace(timeMatch ? timeMatch[0] : "", "").trim()} ${timeStr}`).getTime();
+    return isNaN(parsedTime) ? Infinity : parsedTime;
+  };
+
+  const currentNow = new Date().getTime();
+
+  const upcomingAppointments = (appointments ?? [])
+    .filter((a) => {
+      if (a.status !== "upcoming") return false;
+      const apptTime = parseApptDate(a.date);
+      if (apptTime < currentNow) return false;
+      return true;
+    })
+    .sort((a, b) => {
+      const dateA = parseApptDate(a.date);
+      const dateB = parseApptDate(b.date);
+      return dateA - dateB;
+    });
+
+  const hasUpcoming = upcomingAppointments.length > 0;
+  const nextUpcoming = hasUpcoming ? upcomingAppointments[0] : null;
+
+  const aiQuestions = profile?.prakriti?.toLowerCase().includes('vata')
+    ? ["Balance Vata dosha", "Gut health tips", "Sleep routine", "Immunity boost"]
+    : profile?.prakriti?.toLowerCase().includes('pitta')
+      ? ["Balance Pitta dosha", "Cooling diet tips", "Sleep routine", "Immunity boost"]
+      : profile?.prakriti?.toLowerCase().includes('kapha')
+        ? ["Balance Kapha dosha", "Active workouts", "Gut health tips", "Immunity boost"]
+        : ["Gut health tips", "Daily routine", "Sleep routine", "Immunity boost"];
+
+  const nextUpcomingCall = upcomingCalls?.[0];
+  let showBanner = false;
+  let bannerMessage = "";
+
+  if (nextUpcomingCall) {
+    const callDate = nextUpcomingCall.isoDateTime 
+      ? new Date(nextUpcomingCall.isoDateTime)
+      : new Date(`${nextUpcomingCall.rawDate || nextUpcomingCall.date}T10:00:00`);
+      
+    const diffDays = Math.ceil((callDate.getTime() - new Date().getTime()) / (1000 * 60 * 60 * 24));
+
+    if (diffDays >= 0 && diffDays <= 3) {
+      showBanner = true;
+      bannerMessage = `Your upcoming appointment is with ${nextUpcomingCall.practitionerName} on ${nextUpcomingCall.date} at ${nextUpcomingCall.time}`;
     }
   }
 
-  function toggleTask(id: string) {
-    setTasks((prev) => prev.map((t) => {
-      if (t.id === id) {
-        const newDone = !t.done;
-        toggleDinacharyaTask(id, newDone);
-        return { ...t, done: newDone };
-      }
-      return t;
-    }));
-  }
-
-  const categoryIcon: Record<DinacharTask["category"], string> = {
-    diet: "🥗",
-    exercise: "🧘",
-    mindfulness: "🌬️",
-    medicine: "🌿",
+  const formatDate = (dateStr: string | undefined | null) => {
+    if (!dateStr) return "";
+    return new Date(dateStr).toLocaleDateString("en-IN", {
+      day: "2-digit",
+      month: "short",
+      year: "numeric",
+    });
   };
 
+  // Get unique consulting doctors (most recent consult per doctor)
+  const consultingDoctorsMap = new Map<string, any>();
+  consultations.forEach((c) => {
+    const doctor = c.practitioners;
+    if (doctor && !consultingDoctorsMap.has(doctor.id)) {
+      consultingDoctorsMap.set(doctor.id, c);
+    }
+  });
+  const consultingDoctors = Array.from(consultingDoctorsMap.values());
+
+  const visibleDoctors = consultingDoctors.filter(
+    (c) => !hiddenDoctorIds.includes(c.practitioners?.id)
+  );
+
+  const activeConsult = selectedConsultId
+    ? consultations.find((c) => c.id === selectedConsultId)
+    : null;
+
+  const handleHideDoctor = (docId: string) => {
+    const updated = [...hiddenDoctorIds, docId];
+    setHiddenDoctorIds(updated);
+    localStorage.setItem("hidden_doctors", JSON.stringify(updated));
+    if (activeConsult?.practitioners?.id === docId) {
+      const remaining = visibleDoctors.filter((c) => c.practitioners?.id !== docId);
+      if (remaining.length > 0) {
+        setSelectedConsultId(remaining[0].id);
+      } else {
+        setSelectedConsultId(null);
+      }
+    }
+  };
+
+  const handleRestoreDoctor = (docId: string) => {
+    const updated = hiddenDoctorIds.filter((id) => id !== docId);
+    setHiddenDoctorIds(updated);
+    localStorage.setItem("hidden_doctors", JSON.stringify(updated));
+  };
+
+  const doctor = activeConsult?.practitioners;
+  const emr = activeConsult?.emr_notes ? (Array.isArray(activeConsult.emr_notes) ? activeConsult.emr_notes[0] : activeConsult.emr_notes) : null;
+  const prescription = activeConsult?.prescriptions?.[0];
+  const rxItems = prescription?.prescription_items || [];
+
+  let chiefComplaints: string[] = [];
+  try {
+    if (emr?.chief_complaint) {
+      chiefComplaints = JSON.parse(emr.chief_complaint);
+    }
+  } catch (e) { }
+
   return (
-    <div className="px-4 sm:px-6 lg:px-8 py-6 max-w-7xl mx-auto">
-      {/* Welcome */}
-      <div className="mb-6 flex items-start justify-between gap-4">
+    <div className="px-4 sm:px-6 lg:px-8 py-8 max-w-7xl mx-auto">
+      {/* Banner */}
+      {showBanner && (
+        <div className="mb-6 bg-indigo-50 border border-indigo-200 rounded-xl p-4 flex items-center justify-between">
+          <div className="flex items-center gap-3">
+            <div className="w-8 h-8 bg-indigo-100 rounded-full flex items-center justify-center">
+              <span className="text-lg">🔔</span>
+            </div>
+            <p className="text-sm font-semibold text-indigo-900">{bannerMessage}</p>
+          </div>
+        </div>
+      )}
+
+      {/* Welcome Header */}
+      <div className="mb-8 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 border-b border-border/60 pb-6">
         <div>
-          <h1 className="font-display text-2xl font-semibold text-foreground">
+          <h1 className="font-display text-3xl font-extrabold tracking-tight text-foreground">
             Good morning, {firstName} 👋
           </h1>
-          <p className="text-sm text-muted-foreground mt-1">Here&apos;s your wellness overview for today</p>
+          <p className="text-sm text-muted-foreground mt-1.5">Here&apos;s your wellness overview and AYUSH companion updates.</p>
           {profile?.abhaId && (
-            <div className="mt-2">
+            <div className="mt-2.5">
               <ABHABadge abhaId={profile.abhaId} linked />
             </div>
           )}
         </div>
-        {upcoming && (
-          <Link href={`/consult?id=${upcoming.consultationId || upcoming.id}`}>
-            <div className="hidden sm:flex items-center gap-2 bg-herb-green text-white px-4 py-2.5 rounded-xl text-sm font-semibold hover:bg-herb-green/90 transition-colors cursor-pointer">
+        {nextUpcoming && (
+          <Link href={`/consult?id=${nextUpcoming.consultationId || nextUpcoming.id}`}>
+            <div className="flex items-center gap-2 bg-gradient-to-r from-herb-green to-herb-green-light text-white px-5 py-3 rounded-2xl text-sm font-semibold hover:shadow-lg hover:opacity-95 transition-all cursor-pointer shadow-sm active:scale-98">
               <span>📹</span>
               <span>Join Today&apos;s Consult</span>
             </div>
@@ -135,57 +244,79 @@ export default function HomePage() {
         )}
       </div>
 
-      <div className="grid grid-cols-1 lg:grid-cols-[1fr_360px] gap-6">
+      <div className="grid grid-cols-1 lg:grid-cols-[1fr_360px] gap-8">
         {/* Left column */}
-        <div className="space-y-6">
+        <div className="space-y-8">
           {/* Upcoming consult banner */}
-          {upcoming ? (
-            <div className="bg-herb-gradient rounded-2xl p-5 text-white relative overflow-hidden">
-              <div className="absolute -right-4 -top-4 w-28 h-28 rounded-full bg-white/5" />
-              <div className="absolute -right-2 -bottom-6 w-36 h-36 rounded-full bg-white/5" />
-              <div className="relative z-10 flex items-start justify-between gap-4">
-                <div>
-                  <p className="text-xs font-medium text-white/70 uppercase tracking-widest">
-                    Upcoming Consult
-                  </p>
-                  <h3 className="font-display text-lg font-semibold mt-1">{upcoming.doctor}</h3>
-                  <p className="text-sm text-white/70 mt-0.5">{upcoming.specialty} · {upcoming.date}</p>
-                  <div className="mt-4 flex items-center gap-2 flex-wrap">
-                    <Link href={`/consult?id=${upcoming.consultationId || upcoming.id}`}>
-                      <button className="px-4 py-1.5 bg-white text-herb-green text-xs font-semibold rounded-full hover:bg-white/90 transition-colors">
-                        Join Room
-                      </button>
-                    </Link>
-                    <Link href={`/waiting-room?id=${upcoming.id}`}>
-                      <button className="px-4 py-1.5 bg-white/15 text-white text-xs font-medium rounded-full hover:bg-white/25 transition-colors">
-                        Waiting Room
-                      </button>
-                    </Link>
-                    <Link href="/appointments">
-                      <button className="px-4 py-1.5 bg-white/15 text-white text-xs font-medium rounded-full hover:bg-white/25 transition-colors">
-                        Reschedule
-                      </button>
-                    </Link>
+          {nextUpcoming ? (
+            <div className="space-y-0">
+              {/* Main Hero Card for Nearest Appointment */}
+              <div className="bg-gradient-to-br from-herb-green via-herb-green-light to-herb-green/95 rounded-[24px] p-6 text-white relative overflow-hidden shadow-lg shadow-herb-green/20 border border-herb-green/30 transition-all duration-300">
+                <div className="relative z-10 flex items-start justify-between gap-4">
+                  <div>
+                    <span className="text-[10px] font-extrabold text-white/90 bg-white/20 px-3 py-1.5 rounded-full uppercase tracking-widest border border-white/20 shadow-sm flex items-center gap-1.5 w-fit">
+                      <div className="w-1.5 h-1.5 rounded-full bg-white animate-pulse" />
+                      Next Consultation
+                    </span>
+                    <h3 className="font-display text-2xl font-black mt-4 tracking-tight drop-shadow-sm">{nextUpcoming.doctor}</h3>
+                    <p className="text-[15px] text-white/90 mt-1 font-medium drop-shadow-sm">{nextUpcoming.specialty}</p>
+
+                    <div className="flex items-center gap-3 mt-4 text-[13px] font-semibold text-white/95">
+                      <div className="flex items-center gap-1.5 bg-black/10 px-3 py-1.5 rounded-lg border border-white/10">
+                        <Calendar size={14} className="opacity-80" />
+                        <span>{nextUpcoming.date.split(/ · |, /)[0]}</span>
+                      </div>
+                      <div className="flex items-center gap-1.5 bg-black/10 px-3 py-1.5 rounded-lg border border-white/10">
+                        <Clock size={14} className="opacity-80" />
+                        <span>{nextUpcoming.date.split(/ · |, /)[1] || "10:00 AM"}</span>
+                      </div>
+                    </div>
+
+                    <div className="mt-6 flex items-center gap-3 flex-wrap">
+                      <Link href={`/consult?id=${nextUpcoming.consultationId || nextUpcoming.id}`}>
+                        <button className="px-5 py-2.5 bg-white text-herb-green text-xs font-black rounded-xl hover:bg-white/95 transition-all shadow-md active:scale-95 flex items-center gap-2">
+                          Join Room
+                          <ArrowRight size={14} />
+                        </button>
+                      </Link>
+                      <Link href={`/waiting-room?id=${nextUpcoming.id}`}>
+                        <button className="px-5 py-2.5 bg-white/15 text-white text-xs font-bold rounded-xl hover:bg-white/25 border border-white/20 transition-all active:scale-95 shadow-sm">
+                          Waiting Room
+                        </button>
+                      </Link>
+                      <Link href="/appointments">
+                        <button className="px-5 py-2.5 bg-transparent text-white/90 text-xs font-bold rounded-xl hover:bg-white/10 hover:text-white transition-all active:scale-95">
+                          Reschedule
+                        </button>
+                      </Link>
+                    </div>
+                  </div>
+
+                  <div className="hidden sm:flex w-20 h-20 rounded-2xl bg-white/15 border border-white/30 items-center justify-center flex-shrink-0">
+                    <span className="text-white font-black font-display text-2xl tracking-wider drop-shadow-md">{nextUpcoming.initials}</span>
                   </div>
                 </div>
-                <div className="hidden sm:flex w-14 h-14 rounded-xl bg-white/20 backdrop-blur-sm border border-white/30 items-center justify-center flex-shrink-0">
-                  <span className="text-white font-bold font-display text-lg">{upcoming.initials}</span>
-                </div>
               </div>
+
+              {/* Carousel for Remaining Consultations */}
+              <UpcomingCarousel appointments={upcomingAppointments.slice(1)} />
             </div>
           ) : (
-            <div className="bg-herb-gradient rounded-2xl p-5 text-white relative overflow-hidden">
-              <div className="absolute -right-4 -top-4 w-28 h-28 rounded-full bg-white/5" />
-              <div className="absolute -right-2 -bottom-6 w-36 h-36 rounded-full bg-white/5" />
-              <div className="relative z-10">
-                <p className="text-xs font-medium text-white/70 uppercase tracking-widest">
-                  No Upcoming Consultations
+            <div className="bg-gradient-to-br from-herb-green via-[#228B22] to-herb-green/90 rounded-[2rem] p-7 text-white relative overflow-hidden shadow-lg border border-herb-green/20">
+              <div className="absolute -right-4 -top-4 w-28 h-28 rounded-full bg-white/5 blur-xl pointer-events-none" />
+              <div className="absolute -right-2 -bottom-6 w-36 h-36 rounded-full bg-white/5 blur-lg pointer-events-none" />
+
+              <div className="relative z-10 max-w-2xl">
+                <span className="text-[10px] font-bold text-white/80 bg-white/15 px-2.5 py-1 rounded-full uppercase tracking-wider border border-white/10">
+                  Consultation
+                </span>
+                <h3 className="font-display text-xl font-bold mt-3">Book your first AYUSH consultation</h3>
+                <p className="text-sm text-white/85 mt-1.5 leading-relaxed font-medium">
+                  Get personalized, holistic treatment and digital prescriptions from verified Ayurveda, Homeopathy, and Yoga experts.
                 </p>
-                <h3 className="font-display text-lg font-semibold mt-1">Book your first AYUSH consultation</h3>
-                <p className="text-sm text-white/70 mt-0.5">Consult with verified Ayurveda, Homeopathy, and Yoga experts.</p>
-                <div className="mt-4">
+                <div className="mt-6">
                   <Link href="/discover">
-                    <button className="px-4 py-1.5 bg-white text-herb-green text-xs font-semibold rounded-full hover:bg-white/90 transition-colors">
+                    <button className="px-5 py-2.5 bg-white text-herb-green text-xs font-bold rounded-xl hover:bg-white/95 transition-all shadow-md active:scale-98">
                       Find Practitioner
                     </button>
                   </Link>
@@ -194,112 +325,378 @@ export default function HomePage() {
             </div>
           )}
 
-          {/* Quick actions */}
-          <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+          {/* Quick actions Grid */}
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
             {[
-              { href: "/discover", icon: "🩺", label: "Book Consult", sub: "6 AYUSH specialties" },
-              { href: "/ai-chat", icon: "✨", label: "AyurSanvaad", sub: "AI Companion" },
-              { href: "/apothecary", icon: "🏥", label: "Apothecary", sub: "Your medicines" },
-              { href: "/records", icon: "📁", label: "Health Records", sub: "Timeline & ABHA" },
+              { href: "/discover", icon: "🩺", label: "Book Consult", sub: "6 AYUSH specialties", color: "bg-emerald-500/10 text-emerald-700" },
+              { href: "/ai-chat", icon: "✨", label: "AyurSanvaad AI", sub: "AI Companion", color: "bg-indigo-500/10 text-indigo-700" },
+              { href: "/apothecary", icon: "🏥", label: "Apothecary", sub: "Your medicines", color: "bg-amber-500/10 text-amber-700" },
+              { href: "/records", icon: "📁", label: "Health Records", sub: "Timeline & ABHA", color: "bg-sky-500/10 text-sky-700" },
             ].map((item) => (
-              <Link key={item.href} href={item.href}>
-                <div className="bg-white rounded-2xl p-4 border border-border hover:border-herb-green/30 hover:shadow-sm transition-all cursor-pointer text-center">
-                  <div className="text-2xl mb-2">{item.icon}</div>
-                  <p className="text-xs font-semibold text-foreground">{item.label}</p>
-                  <p className="text-[10px] text-muted-foreground mt-0.5">{item.sub}</p>
+              <Link key={item.href} href={item.href} className="group block">
+                <div className="bg-white rounded-3xl p-5 border border-border/80 hover:border-herb-green/30 hover:shadow-[0_12px_24px_-8px_rgba(27,107,74,0.08)] hover:-translate-y-1 transition-all duration-300 cursor-pointer text-center relative overflow-hidden h-full">
+                  <div className={cn("w-12 h-12 rounded-2xl flex items-center justify-center text-xl mx-auto mb-3.5 transition-transform duration-300 group-hover:scale-110", item.color)}>
+                    {item.icon}
+                  </div>
+                  <p className="text-xs font-bold text-foreground group-hover:text-herb-green transition-colors">{item.label}</p>
+                  <p className="text-[10px] text-muted-foreground mt-1 font-medium">{item.sub}</p>
                 </div>
               </Link>
             ))}
           </div>
 
-          {/* Dinacharya Tracker */}
-          <section className="bg-white rounded-2xl border border-border p-5">
-            <div className="flex items-center justify-between mb-1">
-              <h2 className="font-display font-semibold text-foreground text-base">
-                Today&apos;s Dinacharya
-              </h2>
-              <div className="flex items-center gap-3">
-                <span className="text-sm font-bold text-herb-green">{progressPct}%</span>
-                <Link href="/dinacharya" className="text-xs text-herb-green font-medium">Full view →</Link>
+          {/* Your Consulting Doctors Section */}
+          <section className="bg-white rounded-[2rem] border border-border/80 p-6 shadow-sm">
+            <h2 className="font-display font-bold text-foreground text-base mb-4 flex items-center gap-2">
+              <Heart className="w-5 h-5 text-emerald-500" />
+              Your Consulting Doctors
+            </h2>
+            {visibleDoctors.length === 0 ? (
+              <div className="text-center py-8 bg-neutral-50 rounded-2xl border border-dashed border-border flex flex-col items-center justify-center">
+                <p className="text-sm text-muted-foreground font-medium">
+                  {consultingDoctors.length === 0
+                    ? "No consultations found yet."
+                    : "All consulting doctors have been hidden."}
+                </p>
+                {consultingDoctors.length === 0 && (
+                  <Link href="/discover" className="mt-3 inline-block">
+                    <button className="px-4 py-2 bg-herb-green text-white text-xs font-bold rounded-xl hover:bg-herb-green/95 transition-all shadow-sm active:scale-98">
+                      Book First Consult
+                    </button>
+                  </Link>
+                )}
               </div>
-            </div>
-            <p className="text-xs text-muted-foreground mb-3">
-              {completedCount} of {tasks.length} completed
-            </p>
-            <Progress value={progressPct} className="h-1.5 mb-4 bg-sand" />
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-              {tasks.length === 0 ? (
-                <p className="text-xs text-muted-foreground py-4 text-center col-span-2">No habits configured for today.</p>
-              ) : (
-                tasks.map((task) => (
-                  <button
-                    key={task.id}
-                    onClick={() => toggleTask(task.id)}
-                    className={cn(
-                      "flex items-center gap-3 p-3 rounded-xl border transition-all duration-200 text-left",
-                      task.done
-                        ? "bg-herb-green/5 border-herb-green/20"
-                        : "bg-background border-border hover:border-herb-green/30"
-                    )}
-                  >
+            ) : (
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                {visibleDoctors.map((c) => {
+                  const doc = c.practitioners;
+                  const isSelected = activeConsult?.id === c.id;
+                  return (
                     <div
+                      key={doc.id}
                       className={cn(
-                        "w-5 h-5 rounded-full border-2 flex items-center justify-center flex-shrink-0 transition-all",
-                        task.done ? "border-herb-green bg-herb-green" : "border-muted-foreground/40"
+                        "p-4 rounded-2xl border transition-all duration-300 flex flex-col justify-between gap-3 shadow-sm hover:shadow-md",
+                        isSelected
+                          ? "bg-herb-green/5 border-herb-green/30 ring-1 ring-herb-green/20"
+                          : "bg-white border-border/80 hover:border-herb-green/20"
                       )}
                     >
-                      {task.done && (
-                        <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth={3}>
-                          <polyline points="20 6 9 17 4 12" />
-                        </svg>
-                      )}
-                    </div>
-                    <div className="flex-1 min-w-0">
-                      <div className="flex items-center gap-1.5">
-                        <span className="text-xs">{categoryIcon[task.category]}</span>
-                        <span
-                          className={cn(
-                            "text-sm font-medium truncate",
-                            task.done ? "task-complete text-muted-foreground" : "text-foreground"
-                          )}
+                      <div className="flex items-start justify-between gap-3 w-full">
+                        <div className="flex items-start gap-3">
+                          <div className="w-10 h-10 rounded-xl bg-herb-green/10 flex items-center justify-center font-bold text-herb-green text-sm flex-shrink-0">
+                            {doc.full_name?.split(" ").filter((w: string) => w).map((w: string) => w[0]).join("").slice(0, 2).toUpperCase()}
+                          </div>
+                          <div>
+                            <p className="text-sm font-bold text-foreground">{doc.full_name}</p>
+                            <p className="text-xs text-muted-foreground mt-0.5 font-medium">
+                              {doc.specializations?.join(" · ") || "Specialist"}
+                            </p>
+                            <p className="text-[10px] text-muted-foreground mt-1 flex items-center gap-1 font-mono">
+                              <Clock className="w-3 h-3 text-slate-400" />
+                              Last Consult: {formatDate(c.created_at)}
+                            </p>
+                          </div>
+                        </div>
+
+                        {/* Hide doctor button */}
+                        <button
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            handleHideDoctor(doc.id);
+                          }}
+                          title="Remove doctor from dashboard"
+                          className="p-1.5 text-gray-400 hover:text-red-500 hover:bg-red-50 rounded-lg transition-colors flex-shrink-0"
                         >
-                          {task.title}
-                        </span>
+                          <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
+                            <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+                          </svg>
+                        </button>
                       </div>
-                      <p className="text-[10px] text-muted-foreground mt-0.5 truncate">
-                        {task.description}
-                      </p>
+                      <button
+                        onClick={() => setSelectedConsultId(c.id)}
+                        className={cn(
+                          "w-full py-2 rounded-xl text-xs font-bold transition-all flex items-center justify-center gap-1 active:scale-[0.97] shadow-sm",
+                          isSelected
+                            ? "bg-herb-green text-white hover:bg-herb-green/90"
+                            : "bg-white border border-border text-foreground hover:bg-neutral-50"
+                        )}
+                      >
+                        <FileText className="w-3.5 h-3.5" />
+                        <span>View Recent Prescription</span>
+                      </button>
                     </div>
-                    <span className="text-xs text-muted-foreground flex-shrink-0">{task.time}</span>
-                  </button>
-                ))
-              )}
-            </div>
+                  );
+                })}
+              </div>
+            )}
+
+            {/* Restore Section */}
+            {hiddenDoctorIds.length > 0 && (
+              <div className="border-t border-dashed border-slate-200 mt-5 pt-4">
+                <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-2">Hidden Doctors</p>
+                <div className="flex flex-wrap gap-2">
+                  {hiddenDoctorIds.map((docId) => {
+                    const consultObj = consultingDoctors.find(c => c.practitioners?.id === docId);
+                    const docName = consultObj?.practitioners?.full_name || "Doctor";
+                    return (
+                      <button
+                        key={docId}
+                        onClick={() => handleRestoreDoctor(docId)}
+                        className="text-xs bg-slate-50 border border-slate-200 text-slate-600 hover:border-herb-green/30 hover:text-herb-green px-3 py-1.5 rounded-xl transition-all shadow-sm flex items-center gap-1.5 active:scale-95 group"
+                      >
+                        <span>{docName}</span>
+                        <span className="font-bold text-[9px] text-slate-400 group-hover:text-herb-green">+ Add back</span>
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
           </section>
 
+          {/* Prescription Preview Modal */}
+          {activeConsult && (
+            <div
+              className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50 p-4 sm:p-6 overflow-y-auto"
+              onClick={() => setSelectedConsultId(null)}
+            >
+              <section
+                className="bg-white rounded-[2rem] border border-border/80 p-6 shadow-2xl space-y-6 w-full max-w-4xl max-h-[90vh] overflow-y-auto relative hide-scrollbar"
+                onClick={(e) => e.stopPropagation()}
+              >
+                {/* Close Button */}
+                <button
+                  onClick={() => setSelectedConsultId(null)}
+                  className="absolute top-6 right-6 p-2 text-slate-400 hover:text-slate-600 hover:bg-slate-100 rounded-full transition-colors z-10"
+                  aria-label="Close prescription"
+                >
+                  <X className="w-5 h-5" />
+                </button>
+
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-border pb-4 pr-10">
+                  <div>
+                    <h3 className="font-display font-semibold text-foreground text-base flex items-center gap-2">
+                      <Pill className="w-5 h-5 text-indigo-500" />
+                      Prescription Details
+                    </h3>
+                    <p className="text-xs text-muted-foreground mt-0.5">
+                      Consultation with Dr. {activeConsult.practitioners?.full_name} on {formatDate(activeConsult.created_at)}
+                    </p>
+                  </div>
+                  <a
+                    href={`/api/consultations/${activeConsult.id}/pdf`}
+                    target="_blank"
+                    className="flex items-center justify-center gap-1.5 px-4 py-2 bg-indigo-50 text-indigo-600 border border-indigo-100 rounded-xl text-xs font-bold hover:bg-indigo-100/80 transition-all hover:shadow-sm active:scale-98 flex-shrink-0"
+                  >
+                    <Download className="w-3.5 h-3.5" />
+                    <span>Download PDF</span>
+                  </a>
+                </div>
+
+              {/* Patient Details & Clinical Summary */}
+              <div className="bg-[#F8FAFC] border border-slate-200/60 rounded-2xl p-5 grid grid-cols-1 md:grid-cols-2 gap-6 text-sm">
+                <div>
+                  <h4 className="text-xs font-extrabold uppercase tracking-wider text-slate-400 mb-3 flex items-center gap-1.5">
+                    <User className="w-3.5 h-3.5" /> Patient Details
+                  </h4>
+                  <div className="space-y-2">
+                    <p className="text-slate-600">Name: <span className="font-semibold text-slate-800">{profile?.name || user?.name}</span></p>
+                    <p className="text-slate-600">Age: <span className="font-semibold text-slate-800">{profile?.age || "N/A"} y</span></p>
+                    <p className="text-slate-600">Gender: <span className="font-semibold text-slate-800 capitalize">{profile?.gender || "N/A"}</span></p>
+                    {activeConsult.id && (
+                      <p className="text-slate-600 font-mono text-xs">ID: <span className="font-semibold text-slate-800 uppercase">{activeConsult.id.split('-')[0]}</span></p>
+                    )}
+                  </div>
+                </div>
+
+                <div>
+                  <h4 className="text-xs font-extrabold uppercase tracking-wider text-slate-400 mb-3 flex items-center gap-1.5">
+                    <FileText className="w-3.5 h-3.5" /> Clinical Summary
+                  </h4>
+                  <div className="space-y-3">
+                    <div>
+                      <p className="text-xs text-slate-500 font-semibold">Chief Complaint</p>
+                      <p className="text-slate-800 font-medium mt-0.5">
+                        {chiefComplaints.join(", ") || "No complaints recorded."}
+                      </p>
+                    </div>
+                    {emr?.history_present && (
+                      <div>
+                        <p className="text-xs text-slate-500 font-semibold">History of Present Illness</p>
+                        <p className="text-slate-700 leading-relaxed mt-0.5 text-xs font-medium">
+                          {emr.history_present}
+                        </p>
+                      </div>
+                    )}
+                  </div>
+                </div>
+              </div>
+
+              {/* Prescribed Formulations */}
+              <div>
+                <h4 className="text-sm font-bold text-slate-900 mb-3 flex items-center gap-2">
+                  <Pill className="w-4 h-4 text-emerald-500" />
+                  Prescribed Medicines
+                </h4>
+                {rxItems.length > 0 ? (
+                  <div className="overflow-x-auto rounded-[20px] border border-slate-200/80 bg-white shadow-sm hide-scrollbar">
+                    <table className="w-full text-left border-collapse min-w-[700px]">
+                      <thead className="sticky top-0 bg-white/95 backdrop-blur-sm z-10">
+                        <tr className="border-b border-slate-200">
+                          <th className="p-4 font-bold text-slate-500 text-[13px] bg-white border-r border-slate-200">Medicine</th>
+                          <th className="p-3 text-center border-r border-slate-200">
+                            <div className="inline-flex items-center gap-1.5 bg-emerald-50 text-emerald-700 px-2.5 py-1.5 rounded-lg text-[12px] font-semibold border border-emerald-200">
+                              <Sunrise size={14} className="opacity-75" /> Morning
+                            </div>
+                          </th>
+                          <th className="p-3 text-center border-r border-slate-200">
+                            <div className="inline-flex items-center gap-1.5 bg-emerald-50 text-emerald-700 px-2.5 py-1.5 rounded-lg text-[12px] font-semibold border border-emerald-200">
+                              <Sun size={14} className="opacity-75" /> Afternoon
+                            </div>
+                          </th>
+                          <th className="p-3 text-center border-r border-slate-200">
+                            <div className="inline-flex items-center gap-1.5 bg-emerald-50 text-emerald-700 px-2.5 py-1.5 rounded-lg text-[12px] font-semibold border border-emerald-200">
+                              <Sunset size={14} className="opacity-75" /> Evening
+                            </div>
+                          </th>
+                          <th className="p-3 text-center border-r border-slate-200">
+                            <div className="inline-flex items-center gap-1.5 bg-emerald-50 text-emerald-700 px-2.5 py-1.5 rounded-lg text-[12px] font-semibold border border-emerald-200">
+                              <Moon size={14} className="opacity-75" /> Night
+                            </div>
+                          </th>
+                          <th className="p-3 text-center border-r border-slate-200">
+                            <div className="inline-flex items-center gap-1.5 bg-emerald-50 text-emerald-700 px-2.5 py-1.5 rounded-lg text-[12px] font-semibold border border-emerald-200">
+                              <UtensilsCrossed size={14} className="opacity-75" /> Before Food
+                            </div>
+                          </th>
+                          <th className="p-3 text-center">
+                            <div className="inline-flex items-center gap-1.5 bg-emerald-50 text-emerald-700 px-2.5 py-1.5 rounded-lg text-[12px] font-semibold border border-emerald-200">
+                              <Utensils size={14} className="opacity-75" /> After Food
+                            </div>
+                          </th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-slate-200">
+                        {rxItems.map((item: any, idx: number) => {
+                          const { m, a, e, n } = parseFrequency(item.frequency);
+                          const { bf, af } = parseTiming(item.time_of_intake || item.anupana);
+                          return (
+                            <tr key={idx} className="hover:bg-slate-50/80 transition-colors group">
+                              <td className="p-4 align-top max-w-[200px] border-r border-slate-200">
+                                <div className="font-semibold text-[16px] text-slate-800 tracking-tight leading-tight">
+                                  {item.medicine_name}
+                                </div>
+                                <div className="text-[13px] text-slate-500 font-medium mt-0.5">
+                                  {item.classical_type || "Tablet"} ({item.dose || "—"})
+                                </div>
+                                {(item.special_instructions || item.duration_days) && (
+                                  <div className="mt-2.5 text-[12px] text-slate-500 bg-slate-50 p-2.5 rounded-xl border border-slate-200 inline-block w-full">
+                                    {item.duration_days && <div className="font-semibold text-slate-600 flex items-center gap-1.5"><Calendar size={13}/> {item.duration_days} Days</div>}
+                                    {item.special_instructions && <div className="flex items-start gap-1.5 mt-1.5 text-slate-400 italic"><FileText size={13} className="shrink-0 mt-0.5"/> {item.special_instructions}</div>}
+                                  </div>
+                                )}
+                              </td>
+                              <td className="p-4 text-center align-middle border-r border-slate-200">
+                                {m && <Check size={20} className="text-emerald-500 mx-auto opacity-90 drop-shadow-sm group-hover:scale-110 transition-transform" strokeWidth={3} />}
+                              </td>
+                              <td className="p-4 text-center align-middle border-r border-slate-200">
+                                {a && <Check size={20} className="text-emerald-500 mx-auto opacity-90 drop-shadow-sm group-hover:scale-110 transition-transform" strokeWidth={3} />}
+                              </td>
+                              <td className="p-4 text-center align-middle border-r border-slate-200">
+                                {e && <Check size={20} className="text-emerald-500 mx-auto opacity-90 drop-shadow-sm group-hover:scale-110 transition-transform" strokeWidth={3} />}
+                              </td>
+                              <td className="p-4 text-center align-middle border-r border-slate-200">
+                                {n && <Check size={20} className="text-emerald-500 mx-auto opacity-90 drop-shadow-sm group-hover:scale-110 transition-transform" strokeWidth={3} />}
+                              </td>
+                              <td className="p-4 text-center align-middle border-r border-slate-200">
+                                {bf && <Check size={20} className="text-emerald-500 mx-auto opacity-90 drop-shadow-sm group-hover:scale-110 transition-transform" strokeWidth={3} />}
+                              </td>
+                              <td className="p-4 text-center align-middle">
+                                {af && <Check size={20} className="text-emerald-500 mx-auto opacity-90 drop-shadow-sm group-hover:scale-110 transition-transform" strokeWidth={3} />}
+                              </td>
+                            </tr>
+                          );
+                        })}
+                      </tbody>
+                    </table>
+                  </div>
+                ) : (
+                  <div className="p-5 text-center bg-slate-50 border border-dashed border-slate-200 rounded-[20px]">
+                    <p className="text-[13px] text-slate-400 font-medium">No formulations prescribed.</p>
+                  </div>
+                )}
+              </div>
+
+              {/* Instructions / Careplan */}
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-6 pt-2">
+                {/* Dietary Advice */}
+                <div className="bg-amber-50/20 border border-amber-100 rounded-2xl p-5">
+                  <h4 className="text-xs font-bold text-amber-800 uppercase tracking-wider mb-2.5 flex items-center gap-1.5">
+                    🥗 Dietary & Nutrition Advice
+                  </h4>
+                  {prescription?.dietary_advice ? (
+                    <div
+                      className="text-xs text-slate-700 leading-relaxed font-medium prose prose-sm max-w-none [&_ul]:list-disc [&_ul]:pl-5 [&_ol]:list-decimal [&_ol]:pl-5 [&_li]:mb-1 [&_p]:mb-3 last:[&_p]:mb-0"
+                      dangerouslySetInnerHTML={{ __html: prescription.dietary_advice }}
+                    />
+                  ) : (
+                    <p className="text-xs text-slate-400 italic">No specific dietary advice recorded.</p>
+                  )}
+                </div>
+
+                {/* Lifestyle Advice */}
+                <div className="bg-emerald-50/20 border border-emerald-100 rounded-2xl p-5">
+                  <h4 className="text-xs font-bold text-emerald-800 uppercase tracking-wider mb-2.5 flex items-center gap-1.5">
+                    🧘 Lifestyle & Exercise Advice
+                  </h4>
+                  {prescription?.lifestyle_advice ? (
+                    <p className="text-xs text-slate-700 leading-relaxed font-medium">
+                      {prescription.lifestyle_advice.replace(/\[Upcoming Session Fixed: .*?\]/g, '').trim() || "No specific lifestyle advice recorded."}
+                    </p>
+                  ) : (
+                    <p className="text-xs text-slate-400 italic">No specific lifestyle advice recorded.</p>
+                  )}
+                </div>
+              </div>
+
+              {/* Follow-up Section */}
+              {prescription?.followup_date && (
+                <div className="bg-indigo-50/30 border border-indigo-100/50 rounded-2xl p-4 flex items-center gap-3">
+                  <Calendar className="w-5 h-5 text-indigo-500" />
+                  <div className="text-xs font-medium text-indigo-900">
+                    Next Follow-up Consultation Scheduled On: <span className="font-bold text-indigo-700">{formatDate(prescription.followup_date)}</span>
+                  </div>
+                </div>
+              )}
+              </section>
+            </div>
+          )}
+
           {/* AI Card */}
-          <Link href="/ai-chat">
-            <div className="bg-white rounded-2xl p-5 border border-copper/30 hover:border-copper/50 hover:shadow-sm transition-all cursor-pointer">
+          <Link href="/ai-chat" className="block group">
+            <div className="bg-white rounded-[2rem] p-6 border border-border/85 hover:border-herb-green/30 hover:shadow-[0_8px_24px_-4px_rgba(27,107,74,0.08)] transition-all duration-300 relative overflow-hidden bg-gradient-to-br from-white to-neutral-50/20">
+              <div className="absolute top-0 right-0 w-32 h-32 bg-herb-green/5 rounded-full blur-2xl opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none" />
+
               <div className="flex items-start gap-4">
-                <div className="w-11 h-11 rounded-xl bg-ivory-gradient border border-copper/20 flex items-center justify-center flex-shrink-0">
+                <div className="w-12 h-12 rounded-2xl bg-herb-green/10 flex items-center justify-center flex-shrink-0 transition-transform duration-300 group-hover:scale-105">
                   <span className="text-xl">✨</span>
                 </div>
                 <div className="flex-1">
-                  <div className="flex items-center gap-2">
-                    <h3 className="text-sm font-semibold text-foreground">AyurSanvaad AI</h3>
-                    <span className="text-[10px] bg-copper/10 text-copper font-medium px-2 py-0.5 rounded-full">
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <h3 className="text-sm font-bold text-foreground group-hover:text-herb-green transition-colors">AyurSanvaad AI</h3>
+                    <span className="text-[9px] bg-herb-green/10 text-herb-green font-bold px-2 py-0.5 rounded-full uppercase tracking-wider border border-herb-green/15">
                       AI Companion
                     </span>
                   </div>
-                  <p className="text-xs text-muted-foreground mt-1 leading-relaxed">
-                    How can I help you balance your wellness routine today?
+                  <p className="text-xs text-muted-foreground mt-1 leading-relaxed font-medium">
+                    How can I help you balance your wellness routine today? Ask about herbs, remedies, or Prakriti.
                   </p>
-                  <div className="mt-3 flex flex-wrap gap-2">
-                    {["Gut health tips", "Balance Pitta dosha", "Sleep routine", "Immunity boost"].map(
+                  <div className="mt-4 flex flex-wrap gap-2">
+                    {aiQuestions.map(
                       (q) => (
                         <span
                           key={q}
-                          className="text-[10px] border border-border rounded-full px-2.5 py-1 text-muted-foreground hover:border-herb-green/40 hover:text-herb-green cursor-pointer transition-colors"
+                          className="text-[10px] font-semibold border border-border rounded-full px-3 py-1 bg-white text-muted-foreground hover:border-herb-green/40 hover:text-herb-green cursor-pointer transition-colors shadow-sm"
                         >
                           {q}
                         </span>
@@ -314,55 +711,17 @@ export default function HomePage() {
 
         {/* Right column */}
         <div className="space-y-6">
-          {/* Wellness score */}
-          <div className="bg-white rounded-2xl border border-border p-5">
-            <div className="flex items-center justify-between mb-3">
-              <div>
-                <h2 className="font-semibold text-foreground text-sm">Wellness Score</h2>
-                <p className="text-xs text-muted-foreground mt-0.5">Based on Dinacharya adherence</p>
-              </div>
-              <span className="font-display text-3xl font-bold text-herb-green">{wellnessScore}</span>
-            </div>
-            <Progress value={wellnessScore} className="h-2 bg-sand" />
-            <div className="flex justify-between mt-2 text-[10px] text-muted-foreground">
-              <span>Needs improvement</span>
-              <span>Excellent</span>
-            </div>
-          </div>
-
-          {/* Prakriti */}
-          <div className="bg-ivory-deep rounded-2xl border border-border p-5">
-            <div className="flex items-center justify-between mb-3">
-              <h2 className="font-semibold text-foreground text-sm">Your Prakriti</h2>
-              <span className="text-xs text-herb-green font-medium">{hasPrakriti ? "Assessed" : "Not Assessed"}</span>
-            </div>
-            <div className="flex gap-2">
-              {prakritiComposition.map((d) => (
-                <div
-                  key={d.dosha}
-                  className={`flex-1 rounded-xl p-3 text-center ${d.color}`}
-                >
-                  <p className="font-bold text-sm font-display">{d.pct}%</p>
-                  <p className="text-[10px] font-medium mt-0.5">{d.dosha}</p>
-                </div>
-              ))}
-            </div>
-            <p className="text-xs text-muted-foreground mt-2.5">
-              {prakritiAdvice}
-            </p>
-          </div>
-
           {/* Top Practitioners */}
-          <section>
-            <div className="flex items-center justify-between mb-3">
-              <h2 className="font-display font-semibold text-foreground">Top Practitioners</h2>
-              <Link href="/discover" className="text-xs text-herb-green font-medium">
+          <section className="bg-white rounded-[2rem] border border-border/80 p-6 shadow-sm">
+            <div className="flex items-center justify-between mb-4">
+              <h2 className="font-display font-bold text-foreground text-sm">Top Practitioners</h2>
+              <Link href="/discover" className="text-xs text-herb-green font-semibold hover:underline">
                 View all →
               </Link>
             </div>
-            <div className="space-y-3">
+            <div className="space-y-4">
               {(practitioners ?? []).slice(0, 3).map((doctor) => (
-                <PractitionerCard key={doctor.id} doctor={doctor} />
+                <PractitionerCard key={doctor.id} doctor={doctor} compact />
               ))}
             </div>
           </section>
