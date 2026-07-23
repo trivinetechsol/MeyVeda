@@ -51,6 +51,14 @@ const parseTiming = (timing: string) => {
 export default function HomePage() {
   const { user } = useAuth();
   const firstName = user?.name?.split(" ")[0] ?? "there";
+  
+  const [greeting, setGreeting] = useState("Good morning");
+
+  useEffect(() => {
+    const hour = new Date().getHours();
+    if (hour >= 12 && hour < 17) setGreeting("Good afternoon");
+    else if (hour >= 17) setGreeting("Good evening");
+  }, []);
 
   // Fetch from backend
   const { data: practitioners } = usePractitioners();
@@ -225,7 +233,7 @@ export default function HomePage() {
       <div className="mb-8 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 border-b border-border/60 pb-6">
         <div>
           <h1 className="font-display text-3xl font-extrabold tracking-tight text-foreground">
-            Good morning, {firstName} 👋
+            {greeting}, {firstName} 👋
           </h1>
           <p className="text-sm text-muted-foreground mt-1.5">Here&apos;s your wellness overview and AYUSH companion updates.</p>
           {profile?.abhaId && (
