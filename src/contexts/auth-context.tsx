@@ -70,14 +70,19 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   }, []);
 
   useEffect(() => {
-    if (user && user.id && user.name === "Verified User") {
+    if (user && user.id) {
+      // Create a flag to track if we've already synced to avoid infinite loops when updateUser is called
+      const hasSyncedKey = `synced_${user.id}`;
+      if (sessionStorage.getItem(hasSyncedKey)) return;
+
       (async () => {
         try {
           const res = await fetch("/api/auth/me");
           if (res.ok) {
             const data = await res.json();
-            if (data.data?.user?.name && data.data.user.name !== "Verified User") {
-              updateUser({ name: data.data.user.name });
+            if (data.data?.user) {
+              updateUser(data.data.user);
+              sessionStorage.setItem(hasSyncedKey, "true");
             }
           }
         } catch (err) {
@@ -85,7 +90,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         }
       })();
     }
-  }, [user, updateUser]);
+  }, [user?.id, updateUser]);
 
   return (
     <AuthContext.Provider value={{ user, loading, login, logout, updateUser }}>

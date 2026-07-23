@@ -36,6 +36,21 @@ const PRACTITIONER_MENU = [
 
 /* Stats are now derived from context/DB — no hardcoded arrays */
 
+function normalizeGender(g?: string): string {
+  if (!g) return "";
+  const lower = g.toLowerCase();
+  if (lower === "male") return "Male";
+  if (lower === "female") return "Female";
+  if (lower === "other") return "Prefer not to say";
+  if (lower === "non-binary") return "Non-binary";
+  return g.charAt(0).toUpperCase() + g.slice(1).toLowerCase();
+}
+
+function normalizeBloodGroup(b?: string): string {
+  if (!b) return "";
+  return b.replace("-", "−");
+}
+
 export default function ProfilePage() {
   const { user, loading, updateUser, logout } = useAuth();
   const { data: profile } = usePatientProfile(user?.role === "patient" ? user?.id : undefined);
@@ -50,10 +65,34 @@ export default function ProfilePage() {
   const { data: pracPrescriptions } = usePractitionerPrescriptions(user?.role === "practitioner" ? user?.id : undefined);
 
   const [tasks, setTasks] = useState<DinacharTask[]>([]);
+  const [editMode, setEditMode] = useState(false);
+  const [showSignOut, setShowSignOut] = useState(false);
+
+  const [form, setForm] = useState({
+    name: user?.name ?? "",
+    email: user?.email ?? "",
+    phone: user?.phone ?? "",
+    dob: user?.dob ?? "",
+    gender: normalizeGender(user?.gender),
+    bloodGroup: normalizeBloodGroup(user?.bloodGroup),
+  });
 
   useEffect(() => {
     if (dbTasks && dbTasks.length > 0) setTasks(dbTasks);
   }, [dbTasks]);
+
+  useEffect(() => {
+    if (user) {
+      setForm({
+        name: user.name ?? "",
+        email: user.email ?? "",
+        phone: user.phone ?? "",
+        dob: user.dob ?? "",
+        gender: normalizeGender(user.gender),
+        bloodGroup: normalizeBloodGroup(user.bloodGroup),
+      });
+    }
+  }, [user]);
 
   if (loading || !user) {
     return (
@@ -148,31 +187,6 @@ export default function ProfilePage() {
         { label: "Prescriptions", value: patientPrescriptions ? String(patientPrescriptions.length) : "0" },
         { label: "Days Active", value: daysActive },
       ];
-
-  const [editMode, setEditMode] = useState(false);
-  const [showSignOut, setShowSignOut] = useState(false);
-
-  const [form, setForm] = useState({
-    name: user?.name ?? "",
-    email: user?.email ?? "",
-    phone: user?.phone ?? "",
-    dob: user?.dob ?? "",
-    gender: user?.gender ?? "",
-    bloodGroup: user?.bloodGroup ?? "",
-  });
-
-  useEffect(() => {
-    if (user) {
-      setForm({
-        name: user.name ?? "",
-        email: user.email ?? "",
-        phone: user.phone ?? "",
-        dob: user.dob ?? "",
-        gender: user.gender ?? "",
-        bloodGroup: user.bloodGroup ?? "",
-      });
-    }
-  }, [user]);
 
   const initials = user?.name
     ? user.name.split(" ").map((w) => w[0]).join("").slice(0, 2).toUpperCase()

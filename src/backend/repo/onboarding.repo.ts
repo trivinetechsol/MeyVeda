@@ -173,16 +173,13 @@ export class OnboardingRepository {
         full_name: p.fullName,
         date_of_birth: p.dateOfBirth,
         gender: p.gender,
-        phone: p.phone,
-        email: p.email,
         address: p.address || null,
         abha_number: p.abhaNumber || null,
         emergency_contact_name: p.emergencyContactName || null,
         emergency_contact_phone: p.emergencyContactPhone || null,
         allergies: p.allergies || [],
         chronic_conditions: p.chronicConditions || [],
-        currentMedications: p.currentMedications || [],
-        is_active: true,
+        current_medications: p.currentMedications || [],
       },
       { onConflict: "user_id" }
     );
