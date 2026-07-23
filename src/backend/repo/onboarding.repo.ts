@@ -1,7 +1,8 @@
 import { createClient } from "@/shared/db/supabase.server";
 
 export type SaveDoctorProfileInput = {
-  userId: string;
+  email: string;
+  phone?: string;
   fullName: string;
   photoUrl?: string;
   signatureUrl?: string;
@@ -17,12 +18,11 @@ export type SaveDoctorProfileInput = {
 };
 
 export type SavePatientProfileInput = {
-  userId: string;
+  email: string;
   fullName: string;
   dateOfBirth: string;
   gender: string;
   phone: string;
-  email: string;
   address?: string;
   abhaNumber?: string;
   emergencyContactName?: string;
@@ -65,15 +65,37 @@ export class OnboardingRepository {
     };
   }
 
-  static async saveDoctorProfileAndVerification(p: SaveDoctorProfileInput): Promise<void> {
+  static async saveDoctorProfileAndVerification(p: SaveDoctorProfileInput): Promise<string> {
     const supabase: any = createClient();
 
-    // Upsert directly into practitioners table
+    // 1. Resolve or create the users row
+    const { data: userIdData, error: userErr } = await supabase
+      .rpc("upsert_user_by_email", {
+        p_email: p.email,
+        p_role: "practitioner",
+      });
+
+    if (userErr) {
+      console.error("[OnboardingRepository] upsert_user_by_email error:", userErr.message);
+      throw new Error(userErr.message || "Failed to create user");
+    }
+
+    const userId = userIdData as string;
+    if (!userId) {
+      throw new Error("Failed to resolve user ID");
+    }
+
+    // Update phone if provided
+    if (p.phone) {
+      await supabase.from("users").update({ mobile: p.phone }).eq("id", userId);
+    }
+
+    // 2. Upsert directly into practitioners table
     const { error: pracErr } = await supabase
       .from("practitioners")
       .upsert(
         {
-          user_id: p.userId,
+          user_id: userId,
           full_name: p.fullName,
           photo_url: p.photoUrl || null,
           signature_url: p.signatureUrl || null,
@@ -98,14 +120,13 @@ export class OnboardingRepository {
       throw new Error(pracErr.message || "Failed to save practitioner profile");
     }
 
-    // Ensure user role is practitioner
-    await supabase.from("users").update({ role: "practitioner" }).eq("id", p.userId);
+    return userId;
   }
 
   static async getPatientProfileByUserId(userId: string): Promise<any | null> {
     const supabase: any = createClient();
     const { data, error } = await supabase
-      .from("patient_profiles")
+      .from("patients")
       .select(`
         *,
         family_members:patient_family_members (*)
@@ -120,17 +141,35 @@ export class OnboardingRepository {
     return data;
   }
 
-  static async savePatientProfile(p: SavePatientProfileInput): Promise<void> {
+  static async savePatientProfile(p: SavePatientProfileInput): Promise<string> {
     const supabase: any = createClient();
+
+    // 1. Resolve or create the users row
+    const { data: userIdData, error: userErr } = await supabase
+      .rpc("upsert_user_by_email", {
+        p_email: p.email,
+        p_role: "patient",
+      });
+
+    if (userErr) {
+      console.error("[OnboardingRepository] upsert_user_by_email error:", userErr.message);
+      throw new Error(userErr.message || "Failed to create user");
+    }
+
+    const userId = userIdData as string;
+    if (!userId) {
+      throw new Error("Failed to resolve user ID");
+    }
 
     await supabase
       .from("users")
-      .update({ role: "patient", abha_number: p.abhaNumber || null })
-      .eq("id", p.userId);
+      .update({ role: "patient", abha_number: p.abhaNumber || null, mobile: p.phone || null })
+      .eq("id", userId);
 
-    const { error } = await supabase.from("patient_profiles").upsert(
+    // 2. Upsert patient profile
+    const { error } = await supabase.from("patients").upsert(
       {
-        user_id: p.userId,
+        user_id: userId,
         full_name: p.fullName,
         date_of_birth: p.dateOfBirth,
         gender: p.gender,
@@ -152,6 +191,8 @@ export class OnboardingRepository {
       console.error("[OnboardingRepository] Error saving patient profile:", error.message);
       throw error;
     }
+    
+    return userId;
   }
 
   static async getVerificationQueue(): Promise<any[]> {

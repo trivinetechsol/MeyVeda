@@ -71,7 +71,7 @@ export default function AvailabilityPage() {
   // Calendar logic
   const calendarDays = useMemo(() => {
     const firstDay = new Date(currentYear, currentMonth, 1);
-    let startDayOfWeek = firstDay.getDay();
+    const startDayOfWeek = firstDay.getDay();
 
     const totalDays = new Date(currentYear, currentMonth + 1, 0).getDate();
     const days = [];

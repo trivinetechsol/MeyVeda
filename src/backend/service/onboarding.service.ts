@@ -15,21 +15,21 @@ export class OnboardingService {
     return OnboardingRepository.getDoctorProfileByUserId(userId);
   }
 
-  static async saveDoctorProfile(input: SaveDoctorProfileInput): Promise<void> {
+  static async saveDoctorProfile(input: SaveDoctorProfileInput): Promise<string> {
     if (!input.fullName?.trim()) throw new Error("Full name is required");
     if (!input.degreeUrl) throw new Error("Degree document is required");
     if (!input.registrationCertUrl) throw new Error("Registration certificate is required");
-    await OnboardingRepository.saveDoctorProfileAndVerification(input);
+    return OnboardingRepository.saveDoctorProfileAndVerification(input);
   }
 
   static async getPatientProfile(userId: string) {
     return OnboardingRepository.getPatientProfileByUserId(userId);
   }
 
-  static async savePatientProfile(input: SavePatientProfileInput): Promise<void> {
+  static async savePatientProfile(input: SavePatientProfileInput): Promise<string> {
     if (!input.fullName?.trim()) throw new Error("Full name is required");
     if (!input.dateOfBirth) throw new Error("Date of birth is required");
-    await OnboardingRepository.savePatientProfile(input);
+    return OnboardingRepository.savePatientProfile(input);
   }
 
   static async getVerificationQueue(authUser: AuthUser) {

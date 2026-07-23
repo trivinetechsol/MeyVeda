@@ -32,50 +32,22 @@ export async function createPatient(req: NextRequest) {
     currentMedications,
   } = body;
 
-  // Cast to any — database types are not yet generated
-  const supabase: any = createClient();
-
-  // 1. Resolve or create the users row
-  const { data: userIdData, error: userErr } = await supabase
-    .rpc("upsert_user_by_email", {
-      p_email: email,
-      p_role: "patient",
+  try {
+    // We will use the service which handles inserting into both users and patients table
+    const userId = await OnboardingService.savePatientProfile({
+      email,
+      fullName,
+      dateOfBirth,
+      gender,
+      phone: phone ?? "",
+      address,
+      abhaNumber,
+      emergencyContactName,
+      emergencyContactPhone,
+      allergies: allergies ?? [],
+      chronicConditions: chronicConditions ?? [],
+      currentMedications: currentMedications ?? [],
     });
-
-  if (userErr) {
-    console.error("[API] upsert_user_by_email error:", userErr);
-    return errorResponse(userErr.message, 500);
-  }
-
-  const userId = userIdData as string;
-  if (!userId) {
-    return errorResponse("Failed to resolve user ID", 500);
-  }
-
-  // 2. Upsert patient profile via SECURITY DEFINER RPC
-  const { error: profileErr } = await supabase.rpc(
-    "upsert_patient_profile",
-    {
-      p_user_id: userId,
-      p_full_name: fullName,
-      p_date_of_birth: dateOfBirth,
-      p_gender: gender,
-      p_phone: phone ?? "",
-      p_email: email,
-      p_address: address ?? null,
-      p_abha_number: abhaNumber ?? null,
-      p_emergency_contact_name: emergencyContactName ?? null,
-      p_emergency_contact_phone: emergencyContactPhone ?? null,
-      p_allergies: allergies ?? [],
-      p_chronic_conditions: chronicConditions ?? [],
-      p_current_medications: currentMedications ?? [],
-    }
-  );
-
-  if (profileErr) {
-    console.error("[API] upsert_patient_profile error:", profileErr);
-    return errorResponse(profileErr.message, 500);
-  }
 
   // Issue Auth Cookies for the new patient
   const tokenPayload = {
@@ -107,6 +79,10 @@ export async function createPatient(req: NextRequest) {
   });
 
   return successResponse({ userId });
+  } catch (error: any) {
+    console.error("[API] createPatient error:", error);
+    return errorResponse(error.message || "Failed to create patient", 500);
+  }
 }
 
 /**
@@ -120,34 +96,9 @@ export async function onboardDoctor(req: NextRequest) {
     return errorResponse("Email and full name are required", 400);
   }
 
-  // Cast to any — database types are not yet generated
-  const supabase: any = createClient();
-
-  // 1. Resolve or create the users row
-  const { data: userIdData, error: userErr } = await supabase
-    .rpc("upsert_user_by_email", {
-      p_email: email,
-      p_role: "practitioner",
-    });
-
-  if (userErr) {
-    console.error("[API] upsert_user_by_email error:", userErr);
-    return errorResponse(userErr.message, 500);
-  }
-
-  const userId = userIdData as string;
-  if (!userId) {
-    return errorResponse("Failed to resolve user ID", 500);
-  }
-
-  // Update phone if provided
-  if (phone) {
-    await supabase.from("users").update({ mobile: phone }).eq("id", userId);
-  }
-
   try {
-    // 2. Save doctor profile and verification request
-    await OnboardingService.saveDoctorProfile({ ...rest, fullName, userId });
+    // 1. Create or resolve user and practitioner
+    const userId = await OnboardingService.saveDoctorProfile({ ...rest, email, phone, fullName });
     
     // 3. Issue Auth Cookies
     const tokenPayload = {
@@ -197,43 +148,22 @@ export async function onboardPatient(req: NextRequest) {
     return errorResponse("Email and full name are required", 400);
   }
 
-  const supabase: any = createClient();
-
-  // 1. Upsert the users row
-  const { data: userIdData, error: userErr } = await supabase.rpc("upsert_user_by_email", {
-    p_email: email,
-    p_role: "patient",
-  });
-
-  if (userErr) {
-    console.error("[onboardPatient] upsert_user_by_email error:", userErr);
-    return errorResponse(userErr.message, 500);
-  }
-
-  const userId = userIdData as string;
-  if (!userId) return errorResponse("Failed to resolve user ID", 500);
-
-  // 2. Upsert patient profile
-  const { error: profileErr } = await supabase.rpc("upsert_patient_profile", {
-    p_user_id: userId,
-    p_full_name: fullName,
-    p_date_of_birth: dateOfBirth ?? null,
-    p_gender: gender ?? null,
-    p_phone: phone ?? "",
-    p_email: email,
-    p_address: address ?? null,
-    p_abha_number: abhaNumber ?? null,
-    p_emergency_contact_name: emergencyContactName ?? null,
-    p_emergency_contact_phone: emergencyContactPhone ?? null,
-    p_allergies: allergies ?? [],
-    p_chronic_conditions: chronicConditions ?? [],
-    p_current_medications: currentMedications ?? [],
-  });
-
-  if (profileErr) {
-    console.error("[onboardPatient] upsert_patient_profile error:", profileErr);
-    return errorResponse(profileErr.message, 500);
-  }
+  try {
+    // 1. Post to both patients table and users table via service
+    const userId = await OnboardingService.savePatientProfile({
+      email,
+      fullName,
+      dateOfBirth,
+      gender,
+      phone: phone ?? "",
+      address,
+      abhaNumber,
+      emergencyContactName,
+      emergencyContactPhone,
+      allergies: allergies ?? [],
+      chronicConditions: chronicConditions ?? [],
+      currentMedications: currentMedications ?? [],
+    });
 
   // 3. Issue auth cookies so the user is immediately logged in
   try {
@@ -260,6 +190,10 @@ export async function onboardPatient(req: NextRequest) {
   }
 
   return successResponse({ success: true, userId });
+  } catch (error: any) {
+    console.error("[onboardPatient] error:", error);
+    return errorResponse(error.message || "Failed to onboard patient", 500);
+  }
 }
 
 /**
