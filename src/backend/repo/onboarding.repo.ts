@@ -320,6 +320,7 @@ export class OnboardingRepository {
         base_clinic_fee,
         degree_url,
         registration_cert_url,
+        signature_url,
         user:users!practitioners_user_id_fkey ( mobile )
       `)
       .eq("id", doctorId)

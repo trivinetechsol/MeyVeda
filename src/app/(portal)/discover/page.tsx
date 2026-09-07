@@ -50,17 +50,65 @@ import {
   ShieldCheck,
   Activity,
   MapPin,
-  Heart
+  Heart,
+  Clock
 } from "lucide-react";
 
 const PAGE_SIZE = 4;
 const SHOW_EXPLORE_SPECIALTIES = false;
+const RECENT_SEARCHES_KEY = "mv_recent_doctor_searches";
+const MAX_RECENT_SEARCHES = 6;
+
+function loadRecentSearches(): string[] {
+  if (typeof window === "undefined") return [];
+  try {
+    const raw = window.localStorage.getItem(RECENT_SEARCHES_KEY);
+    const parsed = raw ? JSON.parse(raw) : [];
+    return Array.isArray(parsed) ? parsed.filter((s) => typeof s === "string") : [];
+  } catch {
+    return [];
+  }
+}
 
 export default function DiscoverPage() {
   const [selected, setSelected] = useState<AYUSHDiscipline | null>(null);
   const [searchQuery, setSearchQuery] = useState("");
   const [showSymptoms, setShowSymptoms] = useState(false);
   const [openFilter, setOpenFilter] = useState<string | null>(null);
+  const [recentSearches, setRecentSearches] = useState<string[]>([]);
+
+  useEffect(() => {
+    setRecentSearches(loadRecentSearches());
+  }, []);
+
+  function saveRecentSearches(next: string[]) {
+    setRecentSearches(next);
+    try {
+      window.localStorage.setItem(RECENT_SEARCHES_KEY, JSON.stringify(next));
+    } catch {
+      // localStorage unavailable (private browsing, quota) — recent list just won't persist
+    }
+  }
+
+  function addRecentSearch(term: string) {
+    const trimmed = term.trim();
+    if (trimmed.length < 2) return;
+    const deduped = [trimmed, ...recentSearches.filter((s) => s.toLowerCase() !== trimmed.toLowerCase())];
+    saveRecentSearches(deduped.slice(0, MAX_RECENT_SEARCHES));
+  }
+
+  function removeRecentSearch(term: string) {
+    saveRecentSearches(recentSearches.filter((s) => s !== term));
+  }
+
+  // Remember a search once the user pauses typing, so next time they don't
+  // have to type the doctor's name again — just pick it from the list.
+  useEffect(() => {
+    if (searchQuery.trim().length < 2) return;
+    const handle = setTimeout(() => addRecentSearch(searchQuery), 900);
+    return () => clearTimeout(handle);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [searchQuery]);
 
   // Custom filter states
   const [videoConsult, setVideoConsult] = useState<boolean | null>(null); // null = any, true = video, false = clinic
@@ -435,6 +483,51 @@ export default function DiscoverPage() {
           {/* Autocomplete Symtoms Overlay */}
           {showSymptoms && (
             <div className="absolute left-0 right-0 top-[calc(100%+8px)] bg-white border border-neutral-200/80 rounded-2xl shadow-2xl z-30 overflow-hidden divide-y divide-neutral-100/70 animate-in fade-in slide-in-from-top-2 duration-200">
+              {recentSearches.filter(
+                (s) => !searchQuery || s.toLowerCase().includes(searchQuery.toLowerCase())
+              ).length > 0 && (
+                <div className="p-2 max-h-48 overflow-y-auto">
+                  <div className="flex items-center justify-between px-3.5 py-2">
+                    <p className="text-[10px] text-muted-foreground/80 font-extrabold uppercase tracking-widest flex items-center gap-1">
+                      <Clock size={10} className="text-herb-green" />
+                      Recent Searches
+                    </p>
+                    <button
+                      onMouseDown={() => saveRecentSearches([])}
+                      className="text-[10px] font-bold text-muted-foreground/70 hover:text-red-500 transition-colors"
+                    >
+                      Clear
+                    </button>
+                  </div>
+                  {recentSearches
+                    .filter((s) => !searchQuery || s.toLowerCase().includes(searchQuery.toLowerCase()))
+                    .map((term) => (
+                      <div
+                        key={term}
+                        className="w-full flex items-center gap-2.5 px-3.5 py-2 rounded-xl hover:bg-herb-green/5 transition-all group/recent"
+                      >
+                        <button
+                          onMouseDown={() => {
+                            setSearchQuery(term);
+                            setShowSymptoms(false);
+                          }}
+                          className="flex-1 text-left flex items-center gap-2.5 min-w-0"
+                        >
+                          <Clock size={12} className="text-muted-foreground/50 flex-shrink-0" />
+                          <span className="text-xs font-semibold text-foreground truncate">{term}</span>
+                        </button>
+                        <button
+                          onMouseDown={() => removeRecentSearch(term)}
+                          aria-label={`Remove "${term}" from recent searches`}
+                          className="p-1 rounded-full opacity-0 group-hover/recent:opacity-100 hover:bg-neutral-200/70 text-muted-foreground transition-all flex-shrink-0"
+                        >
+                          <X size={11} />
+                        </button>
+                      </div>
+                    ))}
+                </div>
+              )}
+
               <div className="p-2 max-h-64 overflow-y-auto">
                 <p className="text-[10px] text-muted-foreground/80 px-3.5 py-2 font-extrabold uppercase tracking-widest flex items-center gap-1">
                   <Sparkles size={10} className="text-herb-green fill-herb-green" />

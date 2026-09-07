@@ -18,6 +18,7 @@ export type ProfileEntity = {
   abhaAddress: string | null;
   address?: string;
   avatarUrl?: string | null;
+  signatureUrl?: string | null;
   linkedDoctorName?: string | null;
   experience?: number | null;
   clinicName?: string | null;
@@ -36,6 +37,7 @@ export type UpdateProfileFields = {
   phone?: string;
   prakriti?: string;
   avatarUrl?: string;
+  signatureUrl?: string;
   state?: string;
   clinicName?: string;
   clinicAddress?: string;
@@ -207,6 +209,7 @@ export class ProfileRepository {
         date_of_birth,
         gender,
         blood_group,
+        signature_url,
         state,
         city,
         clinic_hospital_name,
@@ -245,6 +248,10 @@ export class ProfileRepository {
       ? practitioner.user[0]
       : practitioner.user;
 
+    const signatureUrl = await this.resolveDoctorDocumentUrl(
+      (practitioner as { signature_url?: string | null }).signature_url
+    );
+
     return {
       id: practitioner.id,
       name: practitioner.full_name ?? "",
@@ -261,11 +268,30 @@ export class ProfileRepository {
       abhaId: null,
       abhaAddress: null,
       address: "",
+      signatureUrl,
       state: practitioner.state ?? "",
       clinicName: practitioner.clinic_hospital_name ?? "",
       clinicAddress: practitioner.clinic_hospital_address ?? "",
       experience: practitioner.experience_years ?? null,
     };
+  }
+
+  /**
+   * "doctor-documents" is a private bucket — stored paths (e.g.
+   * "doctor-documents/xyz/signature_123.png") need a signed URL before a
+   * browser or a server-rendered PDF can load them.
+   */
+  private async resolveDoctorDocumentUrl(storedPath?: string | null): Promise<string | null> {
+    if (!storedPath) return null;
+    const cleanPath = storedPath.replace(/^doctor-documents\//, "");
+    const { data, error } = await this.supabase.storage
+      .from("doctor-documents")
+      .createSignedUrl(cleanPath, 3600);
+    if (error) {
+      console.error("Failed to sign doctor document URL:", error.message);
+      return null;
+    }
+    return data?.signedUrl ?? null;
   }
 
   private async getPatientProfile(
@@ -432,6 +458,10 @@ export class ProfileRepository {
 
       if (updates.bloodGroup !== undefined) {
         tableUpdates.blood_group = updates.bloodGroup || null;
+      }
+
+      if (practitioner && updates.signatureUrl !== undefined) {
+        tableUpdates.signature_url = updates.signatureUrl || null;
       }
 
       if (!practitioner) {

@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef, type PointerEvent as ReactPointerEvent } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { toast } from "react-hot-toast";
@@ -84,6 +84,12 @@ export default function CreateProfilePage() {
   const [registrationCertUrl, setRegistrationCertUrl] = useState("");
   const [degreeFile, setDegreeFile] = useState<File | null>(null);
   const [regCertFile, setRegCertFile] = useState<File | null>(null);
+  const [signatureUrl, setSignatureUrl] = useState("");
+
+  // Signature pad
+  const signatureCanvasRef = useRef<HTMLCanvasElement>(null);
+  const isDrawingSignatureRef = useRef(false);
+  const [hasSignatureDrawing, setHasSignatureDrawing] = useState(false);
 
   useEffect(() => {
     if (!authLoading && user && !isPatient && !isPractitioner && !isAssistant) {
@@ -135,6 +141,7 @@ export default function CreateProfilePage() {
           setVerificationStatus(data.verification_status || "");
           setDegreeUrl(data.degree_url || "");
           setRegistrationCertUrl(data.registration_cert_url || "");
+          setSignatureUrl(data.signature_url || "");
           setState(data.state || "");
           setCity(data.city || "");
           setClinicName(data.clinic_hospital_name || "");
@@ -198,6 +205,118 @@ export default function CreateProfilePage() {
     return result;
   }
 
+  function getSignatureCanvasContext() {
+    const canvas = signatureCanvasRef.current;
+    return canvas ? canvas.getContext("2d") : null;
+  }
+
+  function signaturePointFromEvent(e: ReactPointerEvent<HTMLCanvasElement>) {
+    const canvas = signatureCanvasRef.current;
+    if (!canvas) return { x: 0, y: 0 };
+    const rect = canvas.getBoundingClientRect();
+    return {
+      x: ((e.clientX - rect.left) / rect.width) * canvas.width,
+      y: ((e.clientY - rect.top) / rect.height) * canvas.height,
+    };
+  }
+
+  function handleSignaturePointerDown(e: ReactPointerEvent<HTMLCanvasElement>) {
+    const ctx = getSignatureCanvasContext();
+    if (!ctx) return;
+    isDrawingSignatureRef.current = true;
+    const { x, y } = signaturePointFromEvent(e);
+    ctx.beginPath();
+    ctx.moveTo(x, y);
+  }
+
+  function handleSignaturePointerMove(e: ReactPointerEvent<HTMLCanvasElement>) {
+    if (!isDrawingSignatureRef.current) return;
+    const ctx = getSignatureCanvasContext();
+    if (!ctx) return;
+    const { x, y } = signaturePointFromEvent(e);
+    ctx.lineWidth = 2;
+    ctx.lineCap = "round";
+    ctx.strokeStyle = "#0f172a";
+    ctx.lineTo(x, y);
+    ctx.stroke();
+    setHasSignatureDrawing(true);
+  }
+
+  function handleSignaturePointerUp() {
+    isDrawingSignatureRef.current = false;
+  }
+
+  function handleClearSignature() {
+    const canvas = signatureCanvasRef.current;
+    const ctx = getSignatureCanvasContext();
+    if (canvas && ctx) ctx.clearRect(0, 0, canvas.width, canvas.height);
+    setHasSignatureDrawing(false);
+  }
+
+  /**
+   * The canvas is a fixed 500x160 box, but a signature usually only fills a
+   * small part of it. Uploading the whole box bakes in a lot of transparent
+   * padding, which then shows up as an odd gap above the printed name on
+   * the generated PDFs — so crop to the drawn strokes' bounding box first.
+   */
+  function trimSignatureCanvas(canvas: HTMLCanvasElement): HTMLCanvasElement {
+    const ctx = canvas.getContext("2d");
+    if (!ctx) return canvas;
+
+    const { width, height } = canvas;
+    const { data } = ctx.getImageData(0, 0, width, height);
+
+    let minX = width, minY = height, maxX = -1, maxY = -1;
+    for (let y = 0; y < height; y++) {
+      for (let x = 0; x < width; x++) {
+        const alpha = data[(y * width + x) * 4 + 3];
+        if (alpha > 10) {
+          if (x < minX) minX = x;
+          if (x > maxX) maxX = x;
+          if (y < minY) minY = y;
+          if (y > maxY) maxY = y;
+        }
+      }
+    }
+
+    if (maxX < minX || maxY < minY) return canvas; // nothing drawn
+
+    const pad = 6;
+    minX = Math.max(0, minX - pad);
+    minY = Math.max(0, minY - pad);
+    maxX = Math.min(width - 1, maxX + pad);
+    maxY = Math.min(height - 1, maxY + pad);
+
+    const trimmedWidth = maxX - minX + 1;
+    const trimmedHeight = maxY - minY + 1;
+
+    const trimmed = document.createElement("canvas");
+    trimmed.width = trimmedWidth;
+    trimmed.height = trimmedHeight;
+    trimmed.getContext("2d")?.drawImage(canvas, minX, minY, trimmedWidth, trimmedHeight, 0, 0, trimmedWidth, trimmedHeight);
+    return trimmed;
+  }
+
+  async function uploadSignature(): Promise<string | undefined> {
+    const canvas = signatureCanvasRef.current;
+    if (!canvas || !hasSignatureDrawing) return undefined;
+
+    const trimmedCanvas = trimSignatureCanvas(canvas);
+    const blob: Blob | null = await new Promise((resolve) => trimmedCanvas.toBlob(resolve, "image/png"));
+    if (!blob) throw new Error("Could not process signature");
+
+    const supabase = createClient();
+    const prefix = (user?.email || user?.id || "doctor").replace(/[^a-zA-Z0-9]/g, "_");
+    const path = `${prefix}/signature_${Date.now()}.png`;
+
+    const { data, error: uploadError } = await supabase.storage
+      .from("doctor-documents")
+      .upload(path, blob, { cacheControl: "3600", upsert: true, contentType: "image/png" });
+    if (uploadError) throw uploadError;
+
+    return `doctor-documents/${data.path}`;
+  }
+
   const ayushNumberInvalid = isPatient && ayushNumber.length > 0 && ayushNumber.length !== 14;
   const patientMissingRequired = isPatient && (!dob || !gender || !bloodGroup);
   const doctorMissingRequired =
@@ -213,7 +332,8 @@ export default function CreateProfilePage() {
       selectedSpecialties.length === 0 ||
       selectedLanguages.length === 0 ||
       !(degreeFile || degreeUrl) ||
-      !(regCertFile || registrationCertUrl));
+      !(regCertFile || registrationCertUrl) ||
+      !(hasSignatureDrawing || signatureUrl));
   const assistantMissingRequired = isAssistant && (!dob || !gender || !bloodGroup);
 
   async function handleSubmit() {
@@ -238,6 +358,7 @@ export default function CreateProfilePage() {
     try {
       if (isPractitioner) {
         const uploaded = await uploadDocuments();
+        const uploadedSignatureUrl = await uploadSignature();
         const res = await fetch("/api/auth/onboard-doctor/", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
@@ -259,6 +380,7 @@ export default function CreateProfilePage() {
             languages: selectedLanguages,
             degreeUrl: uploaded.degreeUrl || degreeUrl || undefined,
             registrationCertUrl: uploaded.registrationCertUrl || registrationCertUrl || undefined,
+            signatureUrl: uploadedSignatureUrl || signatureUrl || undefined,
           }),
         });
         const data = await res.json();
@@ -678,6 +800,61 @@ export default function CreateProfilePage() {
                   <p className="text-xs text-red-500 mt-1.5">Registration certificate is required</p>
                 )}
               </div>
+            </div>
+          </div>
+
+          {/* ── Digital Signature ── */}
+          <div className="bg-white rounded-2xl border border-slate-100 shadow-[0_1px_3px_rgba(30,41,59,0.04)] p-6 sm:p-7">
+            <div className="flex items-start gap-3 mb-6">
+              <div className="w-9 h-9 rounded-xl bg-gradient-to-br from-blue-50 to-indigo-100/70 border border-indigo-100 flex items-center justify-center flex-shrink-0">
+                <FileCheck2 size={17} className="text-indigo-600" />
+              </div>
+              <div>
+                <h2 className="text-[15px] font-semibold text-slate-900">
+                  Digital Signature <span className="text-red-500">*</span>
+                </h2>
+                <p className="text-xs text-slate-500 mt-0.5">
+                  Draw your signature — it will appear on patient invoices and prescription PDFs.
+                </p>
+              </div>
+            </div>
+
+            <p className="text-xs text-slate-500 mb-2">
+              Please sign in the center of the box below for the best result.
+            </p>
+
+            {signatureUrl && (
+              <p className="text-xs text-emerald-600 font-medium mb-2">
+                {hasSignatureDrawing ? "✓ Signature saved — replacing it below" : "✓ Signature saved — draw below to replace it"}
+              </p>
+            )}
+
+            <canvas
+              ref={signatureCanvasRef}
+              width={500}
+              height={160}
+              className={cn(
+                "w-full h-40 rounded-xl border border-dashed bg-slate-50/60 touch-none cursor-crosshair",
+                showValidation && !(hasSignatureDrawing || signatureUrl) ? "border-red-300" : "border-slate-200"
+              )}
+              onPointerDown={handleSignaturePointerDown}
+              onPointerMove={handleSignaturePointerMove}
+              onPointerUp={handleSignaturePointerUp}
+              onPointerLeave={handleSignaturePointerUp}
+            />
+            {showValidation && !(hasSignatureDrawing || signatureUrl) && (
+              <p className="text-xs text-red-500 mt-1.5">Signature is required</p>
+            )}
+
+            <div className="flex justify-end mt-3">
+              <button
+                type="button"
+                onClick={handleClearSignature}
+                disabled={!hasSignatureDrawing}
+                className="px-4 py-2 text-xs font-medium rounded-lg border border-slate-200 text-slate-600 hover:bg-slate-50 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                Clear
+              </button>
             </div>
           </div>
 

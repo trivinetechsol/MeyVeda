@@ -15,7 +15,7 @@ export type ProfileCompletion = {
 const NOT_SET: ProfileCompletion = { applicable: false, loading: false, completed: 0, total: 0, pct: 0 };
 
 function totalFor(role: "practitioner" | "assistant" | "patient"): number {
-  if (role === "practitioner") return 7;
+  if (role === "practitioner") return 8;
   if (role === "assistant") return 3;
   return 5;
 }
@@ -71,6 +71,7 @@ export function useProfileCompletion(): ProfileCompletion {
             (data.languages?.length ?? 0) > 0,
             (data.consultation_fee ?? 0) > 0,
             !!data.degree_url && !!data.registration_cert_url,
+            !!data.signature_url,
           ];
         } else if (isAssistant) {
           checks = [!!data.dob, !!data.gender, !!data.bloodGroup];

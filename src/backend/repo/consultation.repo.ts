@@ -82,7 +82,7 @@ const CONSULTATION_REPORT_SELECT = `
   appointment_id,
   practitioner_id,
   patients ( full_name, date_of_birth, gender, prakriti, city, user:users(mobile, email, abha:abha_links(abha_id)) ),
-  practitioners ( id, full_name, specializations, qualifications, hpr_id, base_video_fee ),
+  practitioners ( id, full_name, specializations, qualifications, hpr_id, base_video_fee, signature_url ),
   emr_notes ( chief_complaint, history_present, assessment, objective_findings, plan ),
   prescriptions ( dietary_advice, lifestyle_advice, followup_date, prescription_items ( medicine_name, dose, frequency, anupana, duration_days, special_instructions, classical_type, time_of_intake ) )
 `;

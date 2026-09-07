@@ -21,6 +21,7 @@ function getMissingRequiredProfileFields(doctor: any): string[] {
   if (!(doctor.languages?.length > 0)) missing.push("languages");
   if (!(resolveActiveFeeRupees(doctor.base_video_fee, doctor.base_clinic_fee) > 0)) missing.push("consultation fee");
   if (!doctor.degree_url || !doctor.registration_cert_url) missing.push("verification documents");
+  if (!doctor.signature_url) missing.push("signature");
   return missing;
 }
 

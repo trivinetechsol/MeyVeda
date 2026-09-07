@@ -1,4 +1,3 @@
-
 import { SupabaseClient } from "@supabase/supabase-js";
 import { z } from "zod";
 import {
@@ -22,6 +21,7 @@ export const updateProfileSchema = z.object({
   pinCode: z.string().trim().optional(),
   prakriti: z.string().trim().optional(),
   avatarUrl: z.string().trim().optional(),
+  signatureUrl: z.string().trim().optional(),
   state: z.string().trim().optional(),
   clinicName: z.string().trim().optional(),
   clinicAddress: z.string().trim().optional(),

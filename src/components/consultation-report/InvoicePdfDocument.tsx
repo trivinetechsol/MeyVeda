@@ -1,8 +1,5 @@
-
-
-
 import React from 'react';
-import { Document, Page, Text, View, StyleSheet } from '@react-pdf/renderer';
+import { Document, Page, Text, View, StyleSheet, Image } from '@react-pdf/renderer';
 
 // Helvetica (the base14 PDF font used here) has no ₹ glyph, so PDF output uses "Rs." instead.
 const formatRupees = (paise: number) => `Rs. ${(paise / 100).toFixed(2)}`;
@@ -38,7 +35,9 @@ const styles = StyleSheet.create({
     paymentBox: { marginBottom: 15, padding: 10, backgroundColor: '#ecfdf5', borderRadius: 4, border: '1 solid #a7f3d0' },
     paymentLabel: { fontSize: 8, color: '#047857', textTransform: 'uppercase', marginBottom: 2 },
     paymentValue: { fontSize: 10, color: '#064e3b' },
-    signatureBlock: { marginTop: 40, alignSelf: 'flex-end', width: 150, borderTop: '1 solid #cbd5e1', paddingTop: 5, textAlign: 'center' },
+    signatureBlock: { marginTop: 40, alignSelf: 'flex-end', width: 150, textAlign: 'center' },
+    signatureImage: { width: 110, height: 34, alignSelf: 'center', objectFit: 'contain' },
+    signatureLine: { borderTop: '1 solid #cbd5e1', paddingTop: 4, marginTop: 2 },
     footer: { position: 'absolute', bottom: 30, left: 40, right: 40, borderTop: '1 solid #e2e8f0', paddingTop: 10, flexDirection: 'row', justifyContent: 'space-between' },
     footerText: { fontSize: 8, color: '#94a3b8' },
 });
@@ -129,8 +128,13 @@ export function InvoicePdfDocument({ data }: { data: any }) {
                 </View>
 
                 <View style={styles.signatureBlock} wrap={false}>
-                    <Text style={styles.value}>Dr. {practitioner.full_name}</Text>
-                    <Text style={styles.subtitle}>Signature</Text>
+                    {practitioner.signature_url && (
+                        <Image style={styles.signatureImage} src={practitioner.signature_url} />
+                    )}
+                    <View style={styles.signatureLine}>
+                        <Text style={styles.value}>Dr. {practitioner.full_name}</Text>
+                        <Text style={styles.subtitle}>Signature</Text>
+                    </View>
                 </View>
 
                 <View style={styles.footer} fixed>
