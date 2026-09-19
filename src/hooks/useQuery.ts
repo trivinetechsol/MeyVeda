@@ -7,7 +7,7 @@
  * used by all feature-specific hooks.
  */
 
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 
 export function useQuery<T>(
   fetcher: () => Promise<T>,
@@ -17,7 +17,11 @@ export function useQuery<T>(
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
-  const fetch = () => {
+  // Memoized on the caller's deps so a stable `refetch` reference can be
+  // used inside a consumer's own useEffect deps array without triggering an
+  // infinite re-run loop.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  const fetch = useCallback(() => {
     setLoading(true);
     fetcher()
       .then((result) => {
@@ -28,9 +32,10 @@ export function useQuery<T>(
         setError(err?.message ?? "Unknown error");
       })
       .finally(() => setLoading(false));
-  };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, deps);
 
-  useEffect(fetch, deps);
+  useEffect(fetch, [fetch]);
 
   return { data, loading, error, refetch: fetch };
 }

@@ -24,10 +24,29 @@ export async function sendMessageController(req: NextRequest) {
   try {
     const authUser = await requireAuth(req);
     const body = await req.json();
-    await MessageService.sendMessage(authUser, body.consultationId, body.content);
+    await MessageService.sendMessage(authUser, body.consultationId, body.content ?? "", body.attachment, body.replyToId);
     return NextResponse.json({ success: true, message: "Message sent successfully" }, { status: 201 });
   } catch (error: unknown) {
     console.error("sendMessageController error:", error);
+    const statusCode = error instanceof AppError ? error.statusCode : 400;
+    return NextResponse.json({ success: false, error: getErrorMessage(error) }, { status: statusCode });
+  }
+}
+
+export async function createAttachmentUploadController(req: NextRequest) {
+  try {
+    const authUser = await requireAuth(req);
+    const body = await req.json();
+    const data = await MessageService.createAttachmentUpload(
+      authUser,
+      body.consultationId,
+      body.fileName,
+      body.fileType,
+      Number(body.fileSize)
+    );
+    return NextResponse.json({ success: true, data });
+  } catch (error: unknown) {
+    console.error("createAttachmentUploadController error:", error);
     const statusCode = error instanceof AppError ? error.statusCode : 400;
     return NextResponse.json({ success: false, error: getErrorMessage(error) }, { status: statusCode });
   }

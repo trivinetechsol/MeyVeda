@@ -4,6 +4,7 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { cn } from "@/lib/utils";
 import { useAuth } from "@/contexts/auth-context";
+import { useUnreadInboxCount } from "@/hooks/use-inbox-unread";
 import {
   Home,
   Calendar,
@@ -24,7 +25,9 @@ import {
   HelpCircle,
   ChevronRight,
   LogOut,
-  Users
+  Users,
+  MessageSquare,
+  UsersRound
 } from "lucide-react";
 import React from "react";
 
@@ -42,6 +45,7 @@ const PATIENT_NAV: NavItem[] = [
   { href: "/", icon: Home, label: "Home", exact: true },
   { href: "/appointments", icon: Calendar, label: "Appointments" },
   { href: "/discover", icon: Search, label: "Discover" },
+  { href: "/messages", icon: MessageSquare, label: "Messages" },
   // { href: "/dinacharya", icon: Sun, label: "Dinacharya" },
   { href: "/records", icon: Folder, label: "Health Records" },
   // { href: "/apothecary", icon: Activity, label: "Apothecary" },
@@ -66,6 +70,16 @@ const PRACTITIONER_NAV: NavItem[] = [
     href: "/pro/prescriptions",
     icon: ClipboardList,
     label: "Prescriptions",
+  },
+  {
+    href: "/pro/inbox",
+    icon: MessageSquare,
+    label: "Inbox",
+  },
+  {
+    href: "/pro/community",
+    icon: UsersRound,
+    label: "Community",
   },
   "separator",
   {
@@ -103,8 +117,12 @@ export function AppSidebar({ open, onClose }: AppSidebarProps) {
   const isAssistant = user?.role === "assistant";
   const showProNav = isPractitioner || isAssistant;
   const navItems = showProNav
-    ? PRACTITIONER_NAV.filter((item) => !(isAssistant && item !== "separator" && item.href === "/pro/assistants"))
+    ? PRACTITIONER_NAV.filter((item) => !(isAssistant && item !== "separator" && (item.href === "/pro/assistants" || item.href === "/pro/community")))
     : PATIENT_NAV;
+
+  const inboxHref = showProNav ? "/pro/inbox" : "/messages";
+  const inboxEndpoint = showProNav ? "/api/pro-inbox" : "/api/patient-inbox";
+  const unreadInboxCount = useUnreadInboxCount(!!user, inboxEndpoint);
 
   const initials = user?.name
     ? user.name.split(" ").map((w) => w[0]).join("").slice(0, 2).toUpperCase()
@@ -175,12 +193,24 @@ export function AppSidebar({ open, onClose }: AppSidebarProps) {
                       )} 
                     />
                     <span className="flex-1">{item.label}</span>
-                    {item.badge && !active && (
-                      <span className={cn("text-[9px] font-extrabold px-1.5 py-0.5 rounded-full leading-none", badgeColor)}>
-                        {item.badge}
-                      </span>
+                    {item.href === inboxHref && unreadInboxCount > 0 ? (
+                      unreadInboxCount === 1 ? (
+                        <span className="w-2 h-2 rounded-full bg-herb-green flex-shrink-0" />
+                      ) : (
+                        <span className="min-w-[18px] h-[18px] px-1 rounded-full bg-herb-green text-white text-[10px] font-bold flex items-center justify-center flex-shrink-0">
+                          {unreadInboxCount > 99 ? "99+" : unreadInboxCount}
+                        </span>
+                      )
+                    ) : (
+                      <>
+                        {item.badge && !active && (
+                          <span className={cn("text-[9px] font-extrabold px-1.5 py-0.5 rounded-full leading-none", badgeColor)}>
+                            {item.badge}
+                          </span>
+                        )}
+                        {active && <div className={cn("w-1.5 h-1.5 rounded-full flex-shrink-0", activeDotColor)} />}
+                      </>
                     )}
-                    {active && <div className={cn("w-1.5 h-1.5 rounded-full flex-shrink-0", activeDotColor)} />}
                   </div>
                 </Link>
               );

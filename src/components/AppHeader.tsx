@@ -1,10 +1,14 @@
 "use client";
 
 import Link from "next/link";
+import { useEffect } from "react";
 import { useAuth } from "@/contexts/auth-context";
 import { useProfileCompletion } from "@/hooks/use-profile-completion";
+import { useNotifications } from "@/hooks/use-notification";
 import { Bell, Menu } from "lucide-react";
 import { usePathname } from "next/navigation";
+
+const NOTIFICATIONS_POLL_MS = 15000;
 
 interface AppHeaderProps {
   onMenuClick: () => void;
@@ -59,6 +63,20 @@ export function AppHeader({ onMenuClick }: AppHeaderProps) {
   const pathname = usePathname();
   const isProRoute = pathname?.startsWith("/pro");
   const completion = useProfileCompletion();
+  const { data: notifications, refetch: refetchNotifications } = useNotifications(user?.id);
+  const unreadNotifCount = notifications?.filter((n) => !n.isRead).length ?? 0;
+
+  // Poll for new notifications, and re-check right away whenever navigation
+  // happens (e.g. the user just left /notifications after reading them).
+  useEffect(() => {
+    if (!user?.id) return;
+    const interval = setInterval(refetchNotifications, NOTIFICATIONS_POLL_MS);
+    return () => clearInterval(interval);
+  }, [user?.id, refetchNotifications]);
+
+  useEffect(() => {
+    if (user?.id) refetchNotifications();
+  }, [pathname, user?.id, refetchNotifications]);
 
   const initials = user?.name
     ? user.name.split(" ").map((w) => w[0]).join("").slice(0, 2).toUpperCase()
@@ -110,7 +128,9 @@ export function AppHeader({ onMenuClick }: AppHeaderProps) {
         <Link href="/notifications">
           <button className="relative p-2.5 rounded-xl hover:bg-neutral-100 text-neutral-600 transition-all active:scale-95">
             <Bell size={18} />
-            <span className="absolute top-2 right-2 w-2 h-2 rounded-full bg-copper border border-white animate-pulse" />
+            {unreadNotifCount > 0 && (
+              <span className="absolute top-2 right-2 w-2 h-2 rounded-full bg-copper border border-white animate-pulse" />
+            )}
           </button>
         </Link>
 

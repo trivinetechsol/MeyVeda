@@ -5,6 +5,12 @@ interface FetchOptions extends RequestInit {
     string,
     string | number | boolean | null | undefined
   >;
+  /**
+   * Skip the console.error for a failed response. Use this for calls whose
+   * caller already treats a non-2xx as expected control flow (e.g. "no nav
+   * context set yet" on a fresh page load) rather than a real failure.
+   */
+  silent?: boolean;
 }
 
 interface ErrorResponse {
@@ -17,7 +23,7 @@ export async function apiClient<T>(
   endpoint: string,
   options: FetchOptions = {}
 ): Promise<T> {
-  const { params, headers, body, ...requestOptions } = options;
+  const { params, headers, body, silent, ...requestOptions } = options;
 
   const isBrowser = typeof window !== "undefined";
   const baseUrl = isBrowser ? "" : (process.env.NEXT_PUBLIC_APP_URL || "http://localhost:3000");
@@ -69,13 +75,15 @@ export async function apiClient<T>(
       (typeof data === "string" && data) ||
       `Request failed with status ${response.status}`;
 
-    console.error("API request failed", {
-      endpoint: url.toString(),
-      method: requestOptions.method ?? "GET",
-      status: response.status,
-      statusText: response.statusText,
-      response: data,
-    });
+    if (!silent) {
+      console.error("API request failed", {
+        endpoint: url.toString(),
+        method: requestOptions.method ?? "GET",
+        status: response.status,
+        statusText: response.statusText,
+        response: data,
+      });
+    }
 
     if (response.status === 401) {
       if (typeof window !== "undefined") {

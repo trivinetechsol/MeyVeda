@@ -8,7 +8,11 @@ export type MessageRow = {
   content: string;
   sentAt: string;
   isRead: boolean;
+  attachment?: { name: string; type: string; size: number; url: string } | null;
+  replyTo?: { direction: string; content: string } | null;
 };
+
+export const CHAT_ATTACHMENT_BUCKET = "chat-attachments";
 
 export class MessageRepository {
   static async getPatientIdFromUserId(userId: string): Promise<string | null> {
@@ -60,7 +64,7 @@ export class MessageRepository {
     const supabase = await createClient();
     const { data, error } = await supabase
       .from("bounded_messages")
-      .select("id, consultation_id, direction, content, sent_at, read_at, sender:users ( id )")
+      .select("id, consultation_id, direction, content, sent_at, read_at, attachment_path, attachment_name, attachment_type, attachment_size, reply_to_id")
       .eq("consultation_id", consultationId)
       .order("sent_at", { ascending: true });
 
@@ -69,15 +73,62 @@ export class MessageRepository {
       throw new Error("Failed to fetch messages from database");
     }
 
-    return (data ?? []).map((row: any) => ({
-      id: row.id,
-      consultationId: row.consultation_id,
-      senderName: row.direction === "patient_to_doctor" ? "You" : "Doctor",
-      direction: row.direction,
-      content: row.content ?? "",
-      sentAt: row.sent_at ? new Date(row.sent_at).toLocaleString("en-IN") : "",
-      isRead: !!row.read_at,
-    }));
+    const byId = new Map<string, any>((data ?? []).map((r: any) => [r.id, r]));
+
+    return Promise.all(
+      (data ?? []).map(async (row: any) => {
+        let attachment: MessageRow["attachment"] = null;
+        if (row.attachment_path) {
+          const { data: signed, error: signError } = await supabase.storage
+            .from(CHAT_ATTACHMENT_BUCKET)
+            .createSignedUrl(row.attachment_path, 3600);
+          if (signError) {
+            console.error("[MessageRepository] Error signing attachment URL:", signError.message);
+          }
+          attachment = {
+            name: row.attachment_name ?? "Attachment",
+            type: row.attachment_type ?? "",
+            size: row.attachment_size ?? 0,
+            url: signed?.signedUrl ?? "",
+          };
+        }
+        return {
+          id: row.id,
+          consultationId: row.consultation_id,
+          senderName: row.direction === "patient_to_doctor" ? "You" : "Doctor",
+          direction: row.direction,
+          content: row.content ?? "",
+          sentAt: row.sent_at ? new Date(row.sent_at).toLocaleString("en-IN") : "",
+          isRead: !!row.read_at,
+          attachment,
+          replyTo: row.reply_to_id
+            ? (() => {
+                const target = byId.get(row.reply_to_id);
+                return {
+                  direction: target?.direction ?? "",
+                  content: target ? target.content || (target.attachment_path ? "📎 Attachment" : "") : "",
+                };
+              })()
+            : null,
+        };
+      })
+    );
+  }
+
+  static async markRead(consultationId: string, readerRole: "patient" | "practitioner"): Promise<void> {
+    const supabase = await createClient();
+    const directionToMark = readerRole === "patient" ? "doctor_to_patient" : "patient_to_doctor";
+
+    const { error } = await supabase
+      .from("bounded_messages")
+      .update({ read_at: new Date().toISOString() })
+      .eq("consultation_id", consultationId)
+      .eq("direction", directionToMark)
+      .is("read_at", null);
+
+    if (error) {
+      console.error("[MessageRepository] Error marking messages read:", error.message);
+    }
   }
 
   static async sendMessage(params: {
@@ -85,6 +136,8 @@ export class MessageRepository {
     senderUserId: string;
     direction: "doctor_to_patient" | "patient_to_doctor";
     content: string;
+    attachment?: { path: string; name: string; type: string; size: number };
+    replyToId?: string | null;
   }): Promise<void> {
     const supabase = await createClient();
     const { error } = await supabase.from("bounded_messages").insert({
@@ -92,11 +145,33 @@ export class MessageRepository {
       sender_user_id: params.senderUserId,
       direction: params.direction,
       content: params.content,
+      reply_to_id: params.replyToId || null,
+      ...(params.attachment
+        ? {
+            attachment_path: params.attachment.path,
+            attachment_name: params.attachment.name,
+            attachment_type: params.attachment.type,
+            attachment_size: params.attachment.size,
+          }
+        : {}),
     });
 
     if (error) {
       console.error("[MessageRepository] Error sending message:", error.message);
       throw new Error("Failed to send message");
     }
+  }
+
+  static async createAttachmentUploadTarget(path: string): Promise<{ path: string; token: string }> {
+    const supabase = await createClient();
+    const { data, error } = await supabase.storage
+      .from(CHAT_ATTACHMENT_BUCKET)
+      .createSignedUploadUrl(path);
+
+    if (error || !data) {
+      console.error("[MessageRepository] Error creating upload URL:", error?.message);
+      throw new Error("Failed to prepare attachment upload");
+    }
+    return { path: data.path, token: data.token };
   }
 }

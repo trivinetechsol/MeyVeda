@@ -1,5 +1,5 @@
 import React from 'react';
-import { Document, Page, Text, View, StyleSheet, Svg, Path } from '@react-pdf/renderer';
+import { Document, Page, Text, View, StyleSheet, Svg, Path, Image } from '@react-pdf/renderer';
 
 const parseFrequency = (freq: string) => {
   const f = freq?.toLowerCase() || "";
@@ -65,7 +65,9 @@ const styles = StyleSheet.create({
   tableCellHeader: { fontSize: 9, color: '#475569' },
   tickText: { fontSize: 10, color: '#10b981', textAlign: 'center' },
   headerCellTick: { fontSize: 8, color: '#475569', textAlign: 'center' },
-  signatureBlock: { marginTop: 40, alignSelf: 'flex-end', width: 150, borderTop: '1 solid #cbd5e1', paddingTop: 5, textAlign: 'center' },
+  signatureBlock: { marginTop: 40, alignSelf: 'flex-end', width: 150, textAlign: 'center' },
+  signatureImage: { width: 110, height: 34, alignSelf: 'center', objectFit: 'contain' },
+  signatureLine: { borderTop: '1 solid #cbd5e1', paddingTop: 4, marginTop: 2 },
   footer: { position: 'absolute', bottom: 30, left: 40, right: 40, borderTop: '1 solid #e2e8f0', paddingTop: 10, flexDirection: 'row', justifyContent: 'space-between' },
   footerText: { fontSize: 8, color: '#94a3b8' }
 });
@@ -308,8 +310,13 @@ export function ConsultationPdfDocument({ data }: { data: any }) {
 
         {/* Footer */}
         <View style={styles.signatureBlock} wrap={false}>
-          <Text style={styles.value}>Dr. {practitioner.full_name}</Text>
-          <Text style={styles.subtitle}>Signature</Text>
+          {practitioner.signature_url && (
+            <Image style={styles.signatureImage} src={practitioner.signature_url} />
+          )}
+          <View style={styles.signatureLine}>
+            <Text style={styles.value}>Dr. {practitioner.full_name}</Text>
+            <Text style={styles.subtitle}>Signature</Text>
+          </View>
         </View>
 
         <View style={styles.footer} fixed>

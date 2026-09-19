@@ -23,6 +23,7 @@ export async function getNavContext<T = Record<string, unknown>>(
   try {
     const result = await apiClient<{ data: T }>("/api/nav-context", {
       params: { key },
+      silent: true,
     });
     return result.data;
   } catch {

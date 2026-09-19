@@ -1,8 +1,8 @@
-export type InboxThread = {
+export type PatientInboxThread = {
   id: string;
-  patientId: string;
-  patientName: string;
-  patientInitials: string;
+  practitionerId: string;
+  doctorName: string;
+  doctorInitials: string;
   lastMessage: string;
   lastMessageTime: string;
   unread: boolean;

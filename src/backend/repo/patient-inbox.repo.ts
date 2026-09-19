@@ -1,10 +1,10 @@
 import { createClient } from "@/shared/db/supabase.server";
 
-export type InboxThread = {
+export type PatientInboxThread = {
   id: string;
-  patientId: string;
-  patientName: string;
-  patientInitials: string;
+  practitionerId: string;
+  doctorName: string;
+  doctorInitials: string;
   lastMessage: string;
   lastMessageTime: string;
   unread: boolean;
@@ -24,37 +24,37 @@ function timeAgo(dateStr: string): string {
   return new Date(dateStr).toLocaleDateString("en-IN", { day: "2-digit", month: "short" });
 }
 
-export class ProInboxRepository {
-  static async getPractitionerIdFromUserId(userId: string): Promise<string | null> {
+export class PatientInboxRepository {
+  static async getPatientIdFromUserId(userId: string): Promise<string | null> {
     const supabase = await createClient();
     const { data, error } = await supabase
-      .from("practitioners")
+      .from("patients")
       .select("id")
       .eq("user_id", userId)
       .maybeSingle();
 
     if (error) {
-      console.error("[ProInboxRepository] Error resolving practitioner_id:", error.message);
+      console.error("[PatientInboxRepository] Error resolving patient_id:", error.message);
       return null;
     }
     return data?.id ?? null;
   }
 
-  static async getInboxForPractitioner(practitionerId: string): Promise<InboxThread[]> {
+  static async getInboxForPatient(patientId: string): Promise<PatientInboxThread[]> {
     const supabase = await createClient();
     const { data: consults, error } = await supabase
       .from("consultations")
       .select(`
-        id, created_at, patient_id,
-        patient:patients ( full_name ),
+        id, created_at, practitioner_id,
+        practitioner:practitioners ( full_name ),
         messages:bounded_messages ( content, sent_at, read_at, direction, attachment_path, attachment_type )
       `)
-      .eq("practitioner_id", practitionerId)
+      .eq("patient_id", patientId)
       .order("created_at", { ascending: false })
       .limit(30);
 
     if (error) {
-      console.error("[ProInboxRepository] Error fetching inbox:", error.message);
+      console.error("[PatientInboxRepository] Error fetching inbox:", error.message);
       throw new Error("Failed to fetch inbox from database");
     }
 
@@ -64,14 +64,14 @@ export class ProInboxRepository {
           new Date(b.sent_at).getTime() - new Date(a.sent_at).getTime()
         );
         const last = msgs[0];
-        const name = c.patient?.full_name ?? "Patient";
+        const name = c.practitioner?.full_name ?? "Doctor";
         const sortTime = last?.sent_at ?? c.created_at;
-        const unreadCount = msgs.filter((m: any) => m.direction === "patient_to_doctor" && !m.read_at).length;
+        const unreadCount = msgs.filter((m: any) => m.direction === "doctor_to_patient" && !m.read_at).length;
         return {
           id: c.id,
-          patientId: c.patient_id,
-          patientName: name,
-          patientInitials: name.split(" ").filter((w: string) => w).map((w: string) => w[0]).join("").slice(0, 2).toUpperCase(),
+          practitionerId: c.practitioner_id,
+          doctorName: name,
+          doctorInitials: name.split(" ").filter((w: string) => w).map((w: string) => w[0]).join("").slice(0, 2).toUpperCase(),
           lastMessage: last
             ? last.content || (last.attachment_path ? (String(last.attachment_type).startsWith("image/") ? "📷 Photo" : "📄 Document") : "")
             : "Start the conversation",

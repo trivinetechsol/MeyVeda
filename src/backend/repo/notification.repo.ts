@@ -2,7 +2,9 @@ import { createClient } from "@/shared/db/supabase.server";
 import { AppError } from "@/shared/api/api-error";
 import { EmailService } from "../service/email.service";
 
-const MISSABLE_STATUSES = ["completed", "missed", "cancelled", "no_show"];
+// "missed" isn't a real appointment_status enum value — the terminal state
+// for a missed appointment is written as "no_show" below.
+const MISSABLE_STATUSES = ["completed", "cancelled", "no_show"];
 
 function formatTime(timeStr: string): string {
   if (!timeStr) return "";

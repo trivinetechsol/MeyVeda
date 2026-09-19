@@ -71,15 +71,11 @@ export class NavContextController {
       const cookieStore = await cookies();
       const token = cookieStore.get(navContextCookieName(key))?.value;
 
-      if (!token) {
-        throw new AppError("No active navigation context", 404);
-      }
-
-      const data = await verifyNavContext(token, authUser.id);
-
-      if (!data) {
-        throw new AppError("Navigation context has expired", 404);
-      }
+      // No token (page opened directly, not deep-linked) or an expired one
+      // is the normal steady state, not a server error — respond 200 with
+      // null data so callers can treat it as "nothing set" without every
+      // direct page load logging a spurious 404.
+      const data = token ? await verifyNavContext(token, authUser.id) : null;
 
       return NextResponse.json({ success: true, data });
     } catch (error: unknown) {

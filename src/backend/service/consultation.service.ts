@@ -2,6 +2,7 @@ import "server-only";
 
 import { ConsultationRepository, type SaveCompleteConsultationInput } from "../repo/consultation.repo";
 import { FamilyRepository } from "../repo/family.repo";
+import { DiscoverRepository } from "../repo/discover.repo";
 import { AuthUser } from "@/shared/auth/auth.types";
 import { resolveActingPractitionerUserId } from "@/shared/auth/resolve-practitioner-context";
 import { ForbiddenError, AppError } from "@/shared/api/api-error";
@@ -56,6 +57,14 @@ export class ConsultationService {
     if (!report) {
       throw new AppError("Consultation report not found", 404);
     }
+
+    // signature_url is a path into the private "doctor-documents" bucket —
+    // resolve it to a signed URL so the PDF renderer can actually load it.
+    const practitioner = report.practitioners as any;
+    if (practitioner?.signature_url) {
+      practitioner.signature_url = await DiscoverRepository.getDoctorSignedUrl(practitioner.signature_url);
+    }
+
     return report;
   }
 

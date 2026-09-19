@@ -4,6 +4,21 @@ import { MessageRepository, type MessageRow } from "../repo/message.repo";
 import { AuthUser } from "@/shared/auth/auth.types";
 import { resolveActingPractitionerUserId } from "@/shared/auth/resolve-practitioner-context";
 import { ForbiddenError, AppError } from "@/shared/api/api-error";
+import { randomUUID } from "crypto";
+
+const ALLOWED_ATTACHMENT_TYPES = ["image/png", "image/jpeg", "image/webp", "application/pdf"];
+const MAX_ATTACHMENT_BYTES = 5 * 1024 * 1024;
+
+export type MessageAttachmentInput = { path: string; name: string; type: string; size: number };
+
+function validateAttachmentMeta(type: string, size: number) {
+  if (!ALLOWED_ATTACHMENT_TYPES.includes(type)) {
+    throw new AppError("Only PNG, JPEG, WebP images and PDF documents are allowed", 400);
+  }
+  if (!Number.isFinite(size) || size <= 0 || size > MAX_ATTACHMENT_BYTES) {
+    throw new AppError("Attachments must be 5 MB or smaller", 400);
+  }
+}
 
 async function assertParticipant(authUser: AuthUser, consultationId: string): Promise<"patient" | "practitioner"> {
   const consultation = await MessageRepository.getConsultationParticipants(consultationId);
@@ -41,23 +56,53 @@ export class MessageService {
     if (!consultationId || consultationId.length !== 36) {
       return [];
     }
-    await assertParticipant(authUser, consultationId);
+    const role = await assertParticipant(authUser, consultationId);
+    await MessageRepository.markRead(consultationId, role);
     return MessageRepository.getMessagesForConsultation(consultationId);
   }
 
-  static async sendMessage(authUser: AuthUser, consultationId: string, content: string): Promise<void> {
-    if (!content?.trim()) {
+  static async createAttachmentUpload(
+    authUser: AuthUser,
+    consultationId: string,
+    fileName: string,
+    fileType: string,
+    fileSize: number
+  ): Promise<{ path: string; token: string }> {
+    await assertParticipant(authUser, consultationId);
+    validateAttachmentMeta(fileType, fileSize);
+
+    const safeName = (fileName || "file").replace(/[^a-zA-Z0-9._-]/g, "_").slice(-80);
+    return MessageRepository.createAttachmentUploadTarget(`${consultationId}/${randomUUID()}-${safeName}`);
+  }
+
+  static async sendMessage(
+    authUser: AuthUser,
+    consultationId: string,
+    content: string,
+    attachment?: MessageAttachmentInput,
+    replyToId?: string | null
+  ): Promise<void> {
+    if (!content?.trim() && !attachment) {
       throw new Error("Message content is required");
     }
 
     const role = await assertParticipant(authUser, consultationId);
+
+    if (attachment) {
+      validateAttachmentMeta(attachment.type, attachment.size);
+      if (!attachment.path?.startsWith(`${consultationId}/`)) {
+        throw new ForbiddenError("Invalid attachment for this conversation");
+      }
+    }
     const direction = role === "patient" ? "patient_to_doctor" : "doctor_to_patient";
 
     await MessageRepository.sendMessage({
       consultationId,
       senderUserId: authUser.id,
       direction,
-      content: content.trim(),
+      content: content?.trim() ?? "",
+      attachment,
+      replyToId,
     });
   }
 }

@@ -19,6 +19,7 @@ export type PatientProfile = {
   abhaAddress: string | null;
   address?: string;
   avatarUrl?: string | null;
+  signatureUrl?: string | null;
   linkedDoctorName?: string | null;
   experience?: number | null;
   clinicName?: string | null;
